@@ -1,59 +1,73 @@
-# USB Forensic File Analyzer
+# ArtifactSleuth
 
-A Python-based forensic tool for analyzing USB drive contents, generating comprehensive reports with file metadata, hashes, malware indicators, and VirusTotal integration.
+ArtifactSleuth is a Python forensic scanner for removable media. It crawls folders and archives, extracts file intelligence, and produces investigator-friendly HTML or CSV reports with hashes, indicators, and optional VirusTotal enrichment.
 
-## Features
+## Highlights
 
-- **Recursive scanning** of directories and archives (ZIP, 7z, RAR, TAR, GZ)
-- **File hashing** (MD5, SHA1, SHA256) for VirusTotal lookups
-- **VirusTotal integration** with configurable rate limiting (4/min free, 500/min premium)
-- **Document analysis** for PDF/Office files (detect macros, scripts, suspicious elements)
-- **Executable analysis** for PE files (extract domains, IPs, suspicious imports)
-- **Beautiful reports** in HTML (with dark/light mode toggle) or CSV format
+- Recursive analysis of folders and archives (ZIP, 7z, RAR, TAR, GZ)
+- Hashing (MD5, SHA1, SHA256) with optional VirusTotal lookups
+- Document triage for PDF and Office files (macros, scripts, suspicious elements)
+- PE analysis for executables (domains, IPs, suspicious imports)
+- Reports in HTML (light/dark toggle) or CSV
 
 ## Installation
 
 ```bash
-cd c:\Code\DataAnalyzer
+cd c:\Code\ArtifactSleuth
 pip install -r requirements.txt
 ```
 
-## Usage
+## Quick Start
 
-### Basic Scan (No VirusTotal)
 ```bash
 python main.py /path/to/usb --output report.html
 ```
 
-### With VirusTotal (Free Tier - 4 lookups/min)
+## Report Preview
+
+![ArtifactSleuth report preview](docs/web_report_example.png)
+
+## Usage Examples
+
+Basic scan (no VirusTotal):
+```bash
+python main.py /path/to/usb --output report.html
+```
+
+VirusTotal (free tier, 4 lookups/min):
 ```bash
 python main.py /path/to/usb --vt-key YOUR_API_KEY --output report.html
 ```
 
-### With VirusTotal (Premium - 500 lookups/min)
+VirusTotal (premium tier, 500 lookups/min):
 ```bash
 python main.py /path/to/usb --vt-key YOUR_API_KEY --vt-rate 500 --output report.html
 ```
 
-### CSV Output
+CSV output:
 ```bash
 python main.py /path/to/usb --format csv --output report.csv
 ```
 
-### Skip VirusTotal Lookups
+Skip VirusTotal lookups:
 ```bash
 python main.py /path/to/usb --no-vt --output report.html
 ```
 
-## Command Line Options
+Enable file logging:
+```bash
+python main.py /path/to/usb --log scan_errors.log --output report.html
+```
 
-- **Extended File Metadata**: Owner, attributes (R/H/S/A), friendly type, computer name
-- **Digital Signatures**: Verification of Authenticode signatures for executables
-- **File Hashes**: MD5, SHA1, SHA256
-- **VirusTotal Results**: Detection ratio, link to full report
-- **Document Analysis**: Macros, JavaScript, suspicious elements
-- **Executable Analysis**: Extracted domains, IPs, suspicious imports
-- **Archive Contents**: Recursively analyzed with full path tracking
+## What Gets Reported
+
+- Extended metadata: owner, attributes (R/H/S/A), friendly type, computer name
+- Digital signatures: Authenticode verification for executables
+- File hashes: MD5, SHA1, SHA256
+- VirusTotal results: detection ratio and report link
+- Document analysis: macros, JavaScript, suspicious elements
+- Executable analysis: extracted domains, IPs, suspicious imports
+- Archive contents: recursive analysis with full path tracking
 
 ## Command Line Options
 

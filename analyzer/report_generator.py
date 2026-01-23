@@ -65,7 +65,7 @@ HTML_TEMPLATE = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>USB Forensic Analysis Report</title>
+    <title>ArtifactSleuth Forensic Report</title>
     <style>
         :root {
             --bg-primary: #1a1a2e;
@@ -461,7 +461,7 @@ HTML_TEMPLATE = '''
     <div class="container">
         <header>
             <div>
-                <h1>🔍 USB Forensic Analysis Report</h1>
+                <h1>🔍 ArtifactSleuth Forensic Report</h1>
                 <div class="header-meta">
                     Generated: {{ generated_time }} | Scanned: {{ scan_path }}
                 </div>
