@@ -1,0 +1,15 @@
+# Core dependencies
+python-magic-bin>=0.4.14  # File type detection (Windows-compatible)
+pefile>=2023.2.7          # PE file parsing
+py7zr>=0.20.0             # 7-Zip support
+rarfile>=4.1              # RAR support
+requests>=2.31.0          # HTTP for VirusTotal API
+jinja2>=3.1.0             # HTML templating
+tqdm>=4.66.0              # Progress bars
+
+# Document analysis (oletools includes olevba, oleid, pdfid)
+oletools>=0.60.1
+
+# Optional but recommended
+chardet>=5.2.0            # Encoding detection for strings
+pywin32>=306              # Windows file owner detection (optional, Windows only)
