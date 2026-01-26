@@ -42,7 +42,7 @@ def generate_csv_report(
         'is_archive', 'is_password_protected', 'archive_path'
     ]
     
-    with open(output_path, 'w', newline='', encoding='utf-8') as f:
+    with open(output_path, 'w', newline='', encoding='utf-8-sig') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
         writer.writeheader()
         
@@ -519,9 +519,91 @@ HTML_TEMPLATE = '''
                 overflow-x: auto;
             }
         }
+        
+        /* Loading overlay */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg-primary);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            transition: opacity 0.3s;
+        }
+        .loading-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .loading-text {
+            margin-top: 1rem;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+        .loading-progress {
+            width: 300px;
+            height: 6px;
+            background: var(--border);
+            border-radius: 3px;
+            margin-top: 1rem;
+            overflow: hidden;
+        }
+        .loading-progress-bar {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 3px;
+            transition: width 0.1s;
+            width: 0%;
+        }
+        .loading-stats {
+            margin-top: 0.5rem;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+        }
+        
+        /* Virtual scroll container */
+        .virtual-scroll-container {
+            height: 600px;
+            overflow-y: auto;
+            position: relative;
+        }
+        .virtual-scroll-spacer {
+            position: absolute;
+            width: 1px;
+            pointer-events: none;
+        }
+        .virtual-scroll-content {
+            position: absolute;
+            left: 0;
+            right: 0;
+        }
     </style>
 </head>
 <body>
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text" id="loadingText">Initializing...</div>
+        <div class="loading-progress">
+            <div class="loading-progress-bar" id="loadingBar"></div>
+        </div>
+        <div class="loading-stats" id="loadingStats"></div>
+    </div>
     <div class="container">
         <header>
             <div>
@@ -598,19 +680,24 @@ HTML_TEMPLATE = '''
                     </select>
                     <span id="resultStats" style="color: var(--text-secondary); font-size: 0.875rem;">Loading...</span>
                 </div>
-                <table id="filesTable">
-                    <thead>
-                        <tr>
-                            <th style="min-width: 300px;">Path</th>
-                            <th>Size</th>
-                            <th>MIME</th>
-                            <th>Risk</th>
-                            <th>SHA256</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody id="filesBody"></tbody>
-                </table>
+                <div class="virtual-scroll-container" id="virtualContainer">
+                    <div class="virtual-scroll-spacer" id="virtualSpacer"></div>
+                    <div class="virtual-scroll-content" id="virtualContent">
+                        <table id="filesTable" style="width:100%;">
+                            <thead id="tableHead">
+                                <tr>
+                                    <th style="min-width: 300px;">Path</th>
+                                    <th>Size</th>
+                                    <th>MIME</th>
+                                    <th>Risk</th>
+                                    <th>SHA256</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="filesBody"></tbody>
+                        </table>
+                    </div>
+                </div>
                 <div class="filter-bar" style="margin-top: 1rem; justify-content: space-between;">
                     <span id="pageInfo" style="color: var(--text-secondary); font-size: 0.875rem;"></span>
                     <div style="display: flex; gap: 0.5rem;">
@@ -772,6 +859,22 @@ HTML_TEMPLATE = '''
     
     <script id="file-data" type="application/json">{{ files_json }}</script>
     <script>
+        // Loading state management
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const loadingText = document.getElementById('loadingText');
+        const loadingBar = document.getElementById('loadingBar');
+        const loadingStats = document.getElementById('loadingStats');
+        
+        function updateLoading(text, progress, stats) {
+            if (loadingText) loadingText.textContent = text;
+            if (loadingBar) loadingBar.style.width = progress + '%';
+            if (loadingStats) loadingStats.textContent = stats || '';
+        }
+        
+        function hideLoading() {
+            if (loadingOverlay) loadingOverlay.classList.add('hidden');
+        }
+        
         // Theme toggle
         function toggleTheme() {
             const html = document.documentElement;
@@ -796,11 +899,18 @@ HTML_TEMPLATE = '''
         }
         
         // Optimized data handling for 100k+ files
-        const filesData = JSON.parse(document.getElementById('file-data').textContent || '[]');
-        let filtered = filesData;
+        updateLoading('Parsing file data...', 10, '');
+        let filesData = [];
+        let filtered = [];
         let page = 1;
         let pageSize = 250;
         let debounceTimer = null;
+        
+        // Virtual scroll state
+        const ROW_HEIGHT = 45;  // Approximate height of each row in pixels
+        let visibleStart = 0;
+        let visibleEnd = 0;
+        let scrollTop = 0;
         
         function formatSize(bytes) {
             if (!bytes || isNaN(bytes)) return '-';
@@ -1198,7 +1308,7 @@ HTML_TEMPLATE = '''
             },
             'Windows Defender detection': {
                 desc: 'Windows Defender identified this file as a threat.',
-                risk: 'HIGH RISK - Microsoft\'s built-in antivirus flagged this file.',
+                risk: 'HIGH RISK - Microsoft built-in antivirus flagged this file.',
                 detection: 'File was scanned locally using Windows Defender command-line scanner.'
             },
             'Contains VBA macros': {
@@ -1298,28 +1408,66 @@ HTML_TEMPLATE = '''
                 return haystack.includes(q);
             });
             page = 1;
-            render();
+            updateVirtualScroll();
         }
         
-        function render() {
+        // Virtual scroll rendering - only renders visible rows
+        function updateVirtualScroll() {
+            const container = document.getElementById('virtualContainer');
+            const spacer = document.getElementById('virtualSpacer');
+            const content = document.getElementById('virtualContent');
             const tbody = document.getElementById('filesBody');
-            if (!tbody) return;
-            const start = (page - 1) * pageSize;
-            const end = Math.min(start + pageSize, filtered.length);
+            if (!container || !tbody) return;
+            
+            const totalHeight = filtered.length * ROW_HEIGHT;
+            spacer.style.height = totalHeight + 'px';
+            
+            const scrollTop = container.scrollTop;
+            const viewportHeight = container.clientHeight;
+            
+            // Calculate visible range with buffer
+            const bufferRows = 10;
+            visibleStart = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - bufferRows);
+            visibleEnd = Math.min(filtered.length, Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + bufferRows);
+            
+            // Position content
+            content.style.top = (visibleStart * ROW_HEIGHT) + 'px';
+            
+            // Build only visible rows
             let html = '';
-            for (let i = start; i < end; i++) {
+            for (let i = visibleStart; i < visibleEnd; i++) {
                 const f = filtered[i];
                 const sha = f.sha256 ? (f.sha256.substring(0,16) + '...') : '-';
                 const mime = f.mime_type ? (f.mime_type.length > 40 ? f.mime_type.substring(0,40)+'...' : f.mime_type) : '-';
-                html += '<tr><td>' + (f.relative_path||f.name||'') + '</td><td>' + formatSize(f.size) + '</td><td class="mime-cell" title="'+(f.mime_type||'')+'">' + mime + '</td><td>' + riskBadge(f.risk_score||0) + '</td><td class="hash-cell">' + sha + '</td><td><button class="view-btn" onclick="showDetails(' + i + ')">View</button></td></tr>';
+                html += '<tr data-idx="' + i + '"><td>' + (f.relative_path||f.name||'') + '</td><td>' + formatSize(f.size) + '</td><td class="mime-cell" title="'+(f.mime_type||'')+'">' + mime + '</td><td>' + riskBadge(f.risk_score||0) + '</td><td class="hash-cell">' + sha + '</td><td><button class="view-btn" onclick="showDetails(' + i + ')">View</button></td></tr>';
             }
             tbody.innerHTML = html;
-            document.getElementById('resultStats').textContent = filtered.length + ' matching • showing ' + (start+1) + '-' + end;
-            document.getElementById('pageInfo').textContent = 'Page ' + page + ' / ' + Math.max(1, Math.ceil(filtered.length / pageSize));
+            
+            // Update stats
+            document.getElementById('resultStats').textContent = filtered.length.toLocaleString() + ' files • showing ' + (visibleStart+1).toLocaleString() + '-' + visibleEnd.toLocaleString();
+            document.getElementById('pageInfo').textContent = 'Scroll to view more | ' + Math.round((scrollTop / Math.max(1, totalHeight - viewportHeight)) * 100) + '% scrolled';
         }
         
-        function prevPage() { if (page > 1) { page--; render(); } }
-        function nextPage() { if (page < Math.ceil(filtered.length / pageSize)) { page++; render(); } }
+        // Debounced scroll handler
+        let scrollTimer = null;
+        function onVirtualScroll() {
+            if (scrollTimer) cancelAnimationFrame(scrollTimer);
+            scrollTimer = requestAnimationFrame(updateVirtualScroll);
+        }
+        
+        // Legacy pagination (now jumps to position in virtual scroll)
+        function prevPage() { 
+            const container = document.getElementById('virtualContainer');
+            if (container) {
+                container.scrollTop = Math.max(0, container.scrollTop - (container.clientHeight - ROW_HEIGHT * 2));
+            }
+        }
+        function nextPage() { 
+            const container = document.getElementById('virtualContainer');
+            if (container) {
+                container.scrollTop = container.scrollTop + (container.clientHeight - ROW_HEIGHT * 2);
+            }
+        }
         
         function showDetails(idx) {
             const f = filtered[idx];
@@ -1367,9 +1515,9 @@ HTML_TEMPLATE = '''
             // Hashes Section
             html += '<h4 style="margin:1.5rem 0 1rem 0;color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:0.5rem;">🔐 File Hashes</h4>';
             html += '<div class="details-grid">';
-            html += '<div class="detail-item"><div class="detail-label">MD5</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.md5||'-') + (f.md5 ? ' <button class="copy-btn" onclick="copyHash(\\''+f.md5+'\\',this)">📋</button>' : '') + '</div></div>';
-            html += '<div class="detail-item"><div class="detail-label">SHA1</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.sha1||'-') + (f.sha1 ? ' <button class="copy-btn" onclick="copyHash(\\''+f.sha1+'\\',this)">📋</button>' : '') + '</div></div>';
-            html += '<div class="detail-item"><div class="detail-label">SHA256</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;word-break:break-all;">' + (f.sha256||'-') + (f.sha256 ? ' <button class="copy-btn" onclick="copyHash(\\''+f.sha256+'\\',this)">📋</button>' : '') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">MD5</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.md5||'-') + (f.md5 ? ' <button class="copy-btn" onclick="copyHash(\x27'+f.md5+'\x27,this)">📋</button>' : '') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">SHA1</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.sha1||'-') + (f.sha1 ? ' <button class="copy-btn" onclick="copyHash(\x27'+f.sha1+'\x27,this)">📋</button>' : '') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">SHA256</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;word-break:break-all;">' + (f.sha256||'-') + (f.sha256 ? ' <button class="copy-btn" onclick="copyHash(\x27'+f.sha256+'\x27,this)">📋</button>' : '') + '</div></div>';
             html += '</div>';
             
             // VirusTotal Section (if available)
@@ -1569,14 +1717,49 @@ HTML_TEMPLATE = '''
             debounceTimer = setTimeout(applyFilters, 200);
         });
         document.getElementById('riskFilter').addEventListener('change', applyFilters);
-        document.getElementById('pageSize').addEventListener('change', function() {
-            pageSize = parseInt(this.value, 10) || 250;
-            page = 1;
-            render();
-        });
         
-        // Initial render
-        applyFilters();
+        // Virtual scroll listener
+        const virtualContainer = document.getElementById('virtualContainer');
+        if (virtualContainer) {
+            virtualContainer.addEventListener('scroll', onVirtualScroll, { passive: true });
+        }
+        
+        // Chunked data loading for 100k+ files
+        function initializeData() {
+            updateLoading('Parsing JSON data...', 20, 'This may take a moment for large datasets');
+            
+            setTimeout(() => {
+                try {
+                    const rawData = document.getElementById('file-data').textContent || '[]';
+                    updateLoading('Parsing ' + (rawData.length / 1024 / 1024).toFixed(1) + ' MB...', 30, '');
+                    
+                    setTimeout(() => {
+                        filesData = JSON.parse(rawData);
+                        const total = filesData.length;
+                        updateLoading('Loaded ' + total.toLocaleString() + ' files', 60, 'Preparing display...');
+                        
+                        setTimeout(() => {
+                            filtered = filesData;
+                            updateLoading('Rendering...', 80, total.toLocaleString() + ' files ready');
+                            
+                            setTimeout(() => {
+                                updateVirtualScroll();
+                                updateLoading('Complete!', 100, total.toLocaleString() + ' files loaded');
+                                
+                                setTimeout(hideLoading, 300);
+                            }, 50);
+                        }, 50);
+                    }, 50);
+                } catch (e) {
+                    updateLoading('Error loading data', 100, e.message);
+                    console.error('Failed to parse file data:', e);
+                    setTimeout(hideLoading, 2000);
+                }
+            }, 100);
+        }
+        
+        // Start initialization
+        initializeData();
     </script>
 </body>
 </html>
@@ -1623,6 +1806,15 @@ def generate_html_report(
     # Sort by risk score (highest first)
     file_dicts.sort(key=lambda x: x.get('risk_score', 0), reverse=True)
     
+    # Optimize JSON by removing null/empty values (reduces size by ~30-50%)
+    def compact_dict(d):
+        return {k: v for k, v in d.items() if v is not None and v != '' and v != [] and v != {}}
+    
+    compact_files = [compact_dict(f) for f in file_dicts]
+    
+    # Use separators without spaces and no indentation for smaller output
+    files_json = json.dumps(compact_files, separators=(',', ':'))
+    
     # Modify summary for split reports
     if split_threshold > 0:
         summary = summary.copy()
@@ -1633,7 +1825,7 @@ def generate_html_report(
     
     html_content = template.render(
         files=file_dicts,
-        files_json=json.dumps(file_dicts),
+        files_json=files_json,
         summary=summary,
         scan_path=scan_path,
         generated_time=datetime.now().strftime('%Y-%m-%d %H:%M:%S')

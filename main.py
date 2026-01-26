@@ -170,6 +170,12 @@ Examples:
     if not output_path.suffix:
         output_path = output_path.with_suffix('.html' if args.format == 'html' else '.csv')
     
+    # Auto-detect format from output extension if not explicitly set
+    if output_path.suffix.lower() == '.csv' and args.format == 'html':
+        args.format = 'csv'
+    elif output_path.suffix.lower() == '.html' and args.format == 'csv':
+        args.format = 'html'
+    
     print("=" * 60)
     print("🔍 USB Forensic File Analyzer")
     print("=" * 60)
