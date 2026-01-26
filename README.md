@@ -85,6 +85,7 @@ python main.py /path/to/usb --exclude-archives .apk,.jar --output report.html
 | `--format`, `-f` | Output format (`html` or `csv`) | `html` |
 | `--log` | Log file path (enables detailed logging) | None |
 | `-v`, `--verbose` | Verbose mode - show detailed logging of file analysis | False |
+| `--defender` | Scan files with Windows Defender for malware detection | False |
 | `--vt-key` | VirusTotal API key | None |
 | `--vt-rate` | VirusTotal rate limit (lookups/min) | 4 |
 | `--no-vt` | Skip VirusTotal lookups | False |
@@ -93,6 +94,27 @@ python main.py /path/to/usb --exclude-archives .apk,.jar --output report.html
 | `--exclude-archives` | Comma-separated archive extensions to skip (e.g., `.apk,.jar,.aar`) | None |
 | `--split-report` | Split HTML report into N files each | 0 (disabled) |
 | `--quiet`, `-q` | Minimal output | False |
+
+### Windows Defender Scanning
+
+Use `--defender` to scan files with Windows Defender (Windows only):
+
+```bash
+python main.py E:\ --defender --output report.html
+```
+
+**Features:**
+- Uses built-in Windows Defender (`MpCmdRun.exe`) for malware scanning
+- Detects threats without quarantining (read-only scan)
+- Results appear in the HTML report detail panel
+- Defender detections add +60 to risk score
+- Scans files on disk (extracted archive contents not scanned after cleanup)
+
+**Requirements:**
+- Windows OS with Windows Defender enabled
+- Administrator privileges not required for basic scanning
+
+**Note:** Files inside archives are only scanned during extraction. If you need to scan all archive contents, extract them first to a folder.
 
 ### Verbose Mode
 

@@ -160,6 +160,12 @@ class FileInfo:
     sig_subject: Optional[str] = None
     sig_issuer: Optional[str] = None
     
+    # Windows Defender results (populated by defender module)
+    defender_scanned: Optional[bool] = None
+    defender_detected: Optional[bool] = None
+    defender_threat_name: Optional[str] = None
+    defender_error: Optional[str] = None
+    
     # Risk assessment
     risk_score: int = 0  # 0-100, higher = more suspicious
     risk_reasons: List[str] = field(default_factory=list)
@@ -224,6 +230,10 @@ class FileInfo:
             'is_signed': self.is_signed,
             'sig_subject': self.sig_subject,
             'sig_issuer': self.sig_issuer,
+            'defender_scanned': self.defender_scanned,
+            'defender_detected': self.defender_detected,
+            'defender_threat_name': self.defender_threat_name,
+            'defender_error': self.defender_error,
             'risk_score': self.risk_score,
             'risk_reasons': self.risk_reasons,
         }
@@ -760,59 +770,137 @@ def calculate_risk_score(file_info: FileInfo) -> None:
     """
     Calculate risk score based on analysis results.
     Modifies the FileInfo object in place.
+    
+    Risk scoring philosophy:
+    - Signed executables from known vendors are trusted more
+    - Network indicators alone are not suspicious (common in legitimate software)
+    - Actual malware detection (VT/Defender) is highly weighted
+    - Document macros/JS are concerning but not definitive
+    - Suspicious imports in unsigned executables are more concerning
     """
     score = 0
     reasons = []
+    ext = Path(file_info.name).suffix.lower()
+    
+    # =========================
+    # HIGH SEVERITY INDICATORS
+    # =========================
+    
+    # Windows Defender detection (strongest signal)
+    if file_info.defender_detected:
+        score += 60
+        threat = file_info.defender_threat_name or "Unknown threat"
+        reasons.append(f"Windows Defender detected: {threat}")
     
     # VirusTotal detection
     if file_info.vt_detected:
         score += 50
         reasons.append(f"VirusTotal detected: {file_info.vt_detection_ratio}")
     
-    # Extension mismatch (potential file spoofing)
-    if file_info.extension_mismatch:
-        score += 15
-        reasons.append(f"Extension mismatch! Expected: {file_info.expected_extensions}")
+    # =========================
+    # MEDIUM SEVERITY INDICATORS
+    # =========================
     
     # Document analysis
     if file_info.doc_has_macros:
-        score += 20
+        score += 15
         reasons.append("Contains macros")
     
     if file_info.doc_has_javascript:
-        score += 25
+        score += 20
         reasons.append("Contains JavaScript")
     
     if file_info.doc_suspicious_elements:
-        score += 10 * len(file_info.doc_suspicious_elements)
+        # Cap suspicious elements contribution at 30 points
+        element_score = min(8 * len(file_info.doc_suspicious_elements), 30)
+        score += element_score
         for elem in file_info.doc_suspicious_elements:
             reasons.append(f"Suspicious element: {elem}")
     
-    # Executable analysis
+    # =========================
+    # LOW SEVERITY / CONTEXTUAL
+    # =========================
+    
+    # Executable analysis - context matters!
+    # Signed executables with network indicators are usually fine (e.g., node.dll, chrome.dll)
+    is_trusted_executable = (
+        file_info.is_signed or 
+        file_info.exe_company in [
+            'Microsoft Corporation', 'Google LLC', 'Google Inc', 'Mozilla Corporation',
+            'Apple Inc.', 'Adobe Systems', 'Adobe Inc.', 'Intel Corporation',
+            'NVIDIA Corporation', 'Oracle Corporation', 'Node.js Foundation',
+            'OpenJS Foundation', 'The Chromium Authors'
+        ]
+    )
+    
+    # Suspicious imports - more concerning for unsigned executables
     if file_info.exe_suspicious_imports:
-        score += 5 * len(file_info.exe_suspicious_imports)
-        reasons.append(f"Suspicious imports: {len(file_info.exe_suspicious_imports)}")
+        num_imports = len(file_info.exe_suspicious_imports)
+        if is_trusted_executable:
+            # Signed/known vendor: minimal penalty, just note it
+            if num_imports > 5:
+                score += 2
+                reasons.append(f"Suspicious imports: {num_imports} (signed/known vendor)")
+        else:
+            # Unsigned: more concerning
+            import_score = min(3 * num_imports, 15)  # Cap at 15
+            score += import_score
+            reasons.append(f"Suspicious imports: {num_imports} (unsigned)")
     
+    # Network indicators - very common in legitimate software
+    # Only flag if combined with other suspicious factors
     if file_info.exe_domains or file_info.exe_ips:
-        # Having network indicators isn't necessarily bad, but worth noting
-        score += 5
-        reasons.append(f"Network indicators: {len(file_info.exe_domains)} domains, {len(file_info.exe_ips)} IPs")
+        total_network = len(file_info.exe_domains or []) + len(file_info.exe_ips or [])
+        if not is_trusted_executable and total_network > 0:
+            # Only add minor score for unsigned executables with network indicators
+            if score > 10:  # Already has other risk factors
+                score += 3
+                reasons.append(f"Network indicators: {len(file_info.exe_domains or [])} domains, {len(file_info.exe_ips or [])} IPs")
+        elif total_network > 20 and not is_trusted_executable:
+            # Excessive network indicators in unsigned exe
+            score += 5
+            reasons.append(f"Many network indicators: {total_network} (unsigned)")
     
-    # Suspicious file extensions
-    suspicious_extensions = {'.exe', '.dll', '.scr', '.bat', '.cmd', '.ps1', '.vbs', '.js', '.hta', '.msi', '.apk', '.jar'}
-    ext = Path(file_info.name).suffix.lower()
-    if ext in suspicious_extensions:
-        score += 5
-        reasons.append(f"Executable/Mobile file type: {ext}")
+    # File type scoring - less aggressive
+    # Scripts and rare executable types are more concerning than DLLs/EXEs
+    high_risk_extensions = {'.scr', '.bat', '.cmd', '.ps1', '.vbs', '.hta', '.wsf', '.wsh'}
+    moderate_extensions = {'.exe', '.msi', '.apk', '.jar'}
+    low_risk_extensions = {'.dll', '.sys', '.ocx', '.drv'}  # Usually system/library files
+    
+    if ext in high_risk_extensions:
+        if not is_trusted_executable:
+            score += 8
+            reasons.append(f"Script/uncommon executable: {ext}")
+    elif ext in moderate_extensions:
+        if not is_trusted_executable:
+            score += 3
+            reasons.append(f"Executable file: {ext}")
+    elif ext in low_risk_extensions:
+        # DLLs are very common and usually benign
+        # Only note if there are other risk factors
+        if score > 15 and not is_trusted_executable:
+            score += 2
+            reasons.append(f"Library file: {ext}")
     
     # APK/Android specific indicators
     if file_info.name.lower() == 'classes.dex':
-        score += 10
+        score += 8
         reasons.append("Android Executable (DEX)")
     
     if file_info.name.lower().endswith('.so') and file_info.archive_path and '.apk' in file_info.archive_path.lower():
-        score += 5
-        reasons.append("Android Native Library (SO)")
+        # Native libraries in APKs are normal
+        pass  # No additional score
+    
+    # =========================
+    # BONUS: Reduce score for trusted executables
+    # =========================
+    if is_trusted_executable and score > 0 and not file_info.vt_detected and not file_info.defender_detected:
+        # Reduce score by 30% for signed/known vendor (unless malware detected)
+        score = int(score * 0.7)
+        if file_info.is_signed:
+            reasons.insert(0, "✓ Digitally signed")
+        elif file_info.exe_company:
+            reasons.insert(0, f"✓ Known vendor: {file_info.exe_company}")
     
     # Cap at 100
     file_info.risk_score = min(score, 100)

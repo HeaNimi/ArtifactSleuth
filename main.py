@@ -29,6 +29,7 @@ from analyzer.metadata import calculate_risk_score
 from analyzer.document_analyzer import analyze_files_documents, is_document
 from analyzer.executable_analyzer import analyze_files_executables, is_executable
 from analyzer.virustotal import lookup_files_virustotal
+from analyzer.defender import scan_files_with_defender, is_defender_available
 from analyzer.report_generator import generate_report
 
 
@@ -124,6 +125,12 @@ Examples:
         '-v', '--verbose',
         action='store_true',
         help='Verbose mode - show detailed logging of file analysis'
+    )
+    
+    parser.add_argument(
+        '--defender',
+        action='store_true',
+        help='Scan files with Windows Defender for malware detection'
     )
     
     parser.add_argument(
@@ -272,10 +279,40 @@ Examples:
         print(f"   Found {total_domains} domains, {total_ips} IPs")
         print()
     
-    # Phase 4: VirusTotal lookups
+    # Phase 4: Windows Defender scan (optional)
+    if args.defender:
+        if not is_defender_available():
+            print("⚠️  Phase 4: Windows Defender not available on this system")
+            print()
+        else:
+            # Only scan files on disk (extracted archive files no longer accessible)
+            scannable_files = [f for f in files if f.archive_path is None and os.path.exists(f.path)]
+            print(f"🛡️  Phase 4: Windows Defender scan for {len(scannable_files)} files...")
+            
+            if not args.quiet:
+                with tqdm(total=len(scannable_files), desc="Defender", unit=" files", ncols=80) as pbar:
+                    def defender_progress(current, total, msg):
+                        pbar.update(1)
+                        if args.verbose:
+                            logger.debug(f"[DEFENDER] {msg}")
+                    stats = scan_files_with_defender(scannable_files, defender_progress)
+            else:
+                stats = scan_files_with_defender(scannable_files)
+            
+            detected = sum(1 for f in files if f.defender_detected)
+            print(f"   Scanned: {stats['total_scanned']}, Detected: {detected}, Errors: {stats['errors']}")
+            
+            if detected > 0:
+                print("   ⚠️  Threats detected by Windows Defender:")
+                for f in files:
+                    if f.defender_detected:
+                        print(f"      - {f.name}: {f.defender_threat_name or 'Unknown threat'}")
+            print()
+    
+    # Phase 5: VirusTotal lookups
     if args.vt_key and not args.no_vt:
         hashable_files = [f for f in files if f.sha256]
-        print(f"🔎 Phase 4: VirusTotal lookups for {len(hashable_files)} files...")
+        print(f"🔎 Phase 5: VirusTotal lookups for {len(hashable_files)} files...")
         print(f"   Rate limit: {args.vt_rate} lookups/minute")
         
         if len(hashable_files) > 10:
@@ -294,7 +331,7 @@ Examples:
         print(f"   Completed: {stats['total_lookups']} lookups, {detected} detections")
         print()
     elif not args.no_vt and not args.vt_key:
-        print("ℹ️  Phase 4: Skipping VirusTotal (no API key provided)")
+        print("ℹ️  Phase 5: Skipping VirusTotal (no API key provided)")
         print("   Use --vt-key YOUR_KEY to enable VirusTotal lookups")
         print()
     
@@ -313,8 +350,8 @@ Examples:
     
     print()
     
-    # Phase 5: Generate report
-    print(f"📝 Phase 5: Generating {args.format.upper()} report...")
+    # Phase 6: Generate report
+    print(f"📝 Phase 6: Generating {args.format.upper()} report...")
     report_paths = generate_report(files, summary, str(output_path), str(scan_path), args.format, args.split_report)
     
     if len(report_paths) == 1:
