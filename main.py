@@ -121,6 +121,12 @@ Examples:
     )
     
     parser.add_argument(
+        '-v', '--verbose',
+        action='store_true',
+        help='Verbose mode - show detailed logging of file analysis'
+    )
+    
+    parser.add_argument(
         '-q', '--quiet',
         action='store_true',
         help='Quiet mode - minimal output'
@@ -129,12 +135,16 @@ Examples:
     args = parser.parse_args()
     
     # Setup logging
-    log_level = logging.INFO
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
-    if args.log:
-        logging.basicConfig(filename=args.log, level=log_level, format=log_format)
+    verbose_format = '%(asctime)s - %(message)s'
+    
+    if args.verbose:
+        # Verbose mode: show detailed output to console
+        logging.basicConfig(level=logging.DEBUG, format=verbose_format, stream=sys.stdout)
+    elif args.log:
+        logging.basicConfig(filename=args.log, level=logging.INFO, format=log_format)
     else:
-        # If no log file, just show Errors to stderr
+        # If no log file and not verbose, just show Errors to stderr
         logging.basicConfig(level=logging.ERROR, format=log_format)
     
     logger = logging.getLogger(__name__)
@@ -221,10 +231,17 @@ Examples:
             with tqdm(total=len(doc_files), desc="Documents", unit=" files", ncols=80) as pbar:
                 def doc_progress(current, total, msg):
                     pbar.update(1)
+                    if args.verbose:
+                        logger.debug(f"[ANALYZE] Document: {msg}")
                 analyze_files_documents(doc_files, doc_progress)
         else:
             analyze_files_documents(doc_files)
         print(f"   Analyzed {len(doc_files)} documents")
+        # Verbose: report findings
+        if args.verbose:
+            for f in doc_files:
+                if f.doc_has_macros or f.doc_has_javascript or f.doc_suspicious_elements:
+                    logger.debug(f"  {f.name}: macros={f.doc_has_macros}, js={f.doc_has_javascript}, suspicious={len(f.doc_suspicious_elements or [])}")
         print()
     
     # Phase 3: Executable analysis
@@ -236,9 +253,18 @@ Examples:
             with tqdm(total=len(exe_files), desc="Executables", unit=" files", ncols=80) as pbar:
                 def exe_progress(current, total, msg):
                     pbar.update(1)
+                    if args.verbose:
+                        logger.debug(f"[ANALYZE] PE: {msg}")
                 analyze_files_executables(exe_files, exe_progress)
         else:
             analyze_files_executables(exe_files)
+        
+        # Verbose: report findings for each exe
+        if args.verbose:
+            for f in exe_files:
+                iocs = len(f.exe_domains or []) + len(f.exe_ips or []) + len(f.exe_urls or [])
+                if iocs > 0 or f.exe_suspicious_imports:
+                    logger.debug(f"  {f.name}: domains={len(f.exe_domains or [])}, ips={len(f.exe_ips or [])}, urls={len(f.exe_urls or [])}, imports={len(f.exe_suspicious_imports or [])}, signed={f.is_signed}")
         
         # Count IOCs found (from all files including those analyzed during extraction)
         total_domains = sum(len(f.exe_domains) for f in files)

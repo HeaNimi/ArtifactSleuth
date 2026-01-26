@@ -77,15 +77,23 @@ class FileScanner:
         if self.progress_callback:
             self.progress_callback(message)
     
-    def _analyze_file_inline(self, file_info: FileInfo) -> None:
+    def _analyze_file_inline(self, file_info: FileInfo, actual_path: str = None) -> None:
         """
         Analyze extracted files (PE/documents) inline while temp dir exists.
         This must be called BEFORE the temp directory is cleaned up.
+        
+        Args:
+            file_info: FileInfo object to update with analysis results
+            actual_path: Actual filesystem path (for extracted files where file_info.path is virtual)
         """
+        # Use actual_path if provided, otherwise fall back to file_info.path
+        analysis_path = actual_path or file_info.path
+        
         try:
             # Analyze executables
-            if is_executable(file_info.path):
-                result = analyze_executable(file_info.path)
+            if is_executable(analysis_path):
+                self.logger.debug(f"[ANALYZE] PE: {file_info.name}")
+                result = analyze_executable(analysis_path)
                 file_info.exe_domains = result['domains']
                 file_info.exe_ips = result['ips']
                 file_info.exe_urls = result['urls']
@@ -96,14 +104,32 @@ class FileScanner:
                     file_info.is_signed = file_info.signature_info.get('is_signed')
                     file_info.sig_subject = file_info.signature_info.get('signer_name') or file_info.signature_info.get('subject')
                     file_info.sig_issuer = file_info.signature_info.get('issuer')
+                # Log findings
+                ioc_count = len(file_info.exe_domains) + len(file_info.exe_ips) + len(file_info.exe_urls)
+                if ioc_count > 0:
+                    self.logger.debug(f"  └─ IOCs: {len(file_info.exe_domains)} domains, {len(file_info.exe_ips)} IPs, {len(file_info.exe_urls)} URLs")
+                if file_info.exe_suspicious_imports:
+                    self.logger.debug(f"  └─ Suspicious imports: {len(file_info.exe_suspicious_imports)}")
+                if file_info.is_signed:
+                    self.logger.debug(f"  └─ Signed by: {file_info.sig_subject}")
+                elif file_info.is_signed is False:
+                    self.logger.debug(f"  └─ Not signed")
             
             # Analyze documents
-            elif is_document(file_info.path):
-                result = analyze_document(file_info.path)
+            elif is_document(analysis_path):
+                self.logger.debug(f"[ANALYZE] Document: {file_info.name}")
+                result = analyze_document(analysis_path)
                 file_info.doc_has_javascript = result.get('has_javascript', False)
                 file_info.doc_has_macros = result.get('has_macros', False)
                 file_info.doc_suspicious_elements = result.get('suspicious_elements', [])
                 file_info.doc_analysis_error = result.get('error')
+                # Log findings
+                if file_info.doc_has_macros:
+                    self.logger.debug(f"  └─ ⚠️  VBA Macros detected!")
+                if file_info.doc_has_javascript:
+                    self.logger.debug(f"  └─ ⚠️  JavaScript detected!")
+                if file_info.doc_suspicious_elements:
+                    self.logger.debug(f"  └─ Suspicious elements: {len(file_info.doc_suspicious_elements)}")
         except Exception as e:
             self.logger.debug(f"Inline analysis error for {file_info.name}: {e}")
     
@@ -171,8 +197,16 @@ class FileScanner:
             else:
                 self._scan_directory(str(path), str(path))
             
-            # Wait for shallow scan to complete
-            executor.shutdown(wait=True)
+            # Wait for all submitted tasks to complete (including nested submissions)
+            while True:
+                with self._lock:
+                    pending = [f for f in self._futures if not f.done()]
+                if not pending:
+                    break
+                # Wait for at least one to complete
+                concurrent.futures.wait(pending, timeout=0.1)
+        
+        self._executor = None
         
         # Flush any pending small file batches
         if self.batch_small_files and self.hash_cache.get_pending_count() > 0:
@@ -235,8 +269,10 @@ class FileScanner:
     
     def _submit_task(self, fn, *args, **kwargs):
         """Submit a task to the executor if active, otherwise run inline."""
-        if self._executor:
-            self._executor.submit(fn, *args, **kwargs)
+        if self._executor and not self._executor._shutdown:
+            future = self._executor.submit(fn, *args, **kwargs)
+            with self._lock:
+                self._futures.append(future)
         else:
             fn(*args, **kwargs)
     
@@ -288,11 +324,15 @@ class FileScanner:
             # Update progress AFTER adding file so count is accurate
             self._update_progress(f"Scanning: {Path(file_path).name}")
             
+            # Verbose logging
+            self.logger.debug(f"[SCAN] {file_info.relative_path} ({file_info.size} bytes, {file_info.mime_type or 'unknown'})")
+            
             # Queue archives for later processing (shallow-first strategy)
             # Skip if archive type is in exclude list
             if is_archive(file_path) and archive_depth < self.max_archive_depth:
                 if not self._should_exclude_archive(file_path):
                     self._archive_queue.put((file_path, scan_root, archive_depth))
+                    self.logger.debug(f"  └─ Queued for extraction (depth={archive_depth})")
         
         except PermissionError:
             err_msg = f"Permission denied: {file_path}"
@@ -329,12 +369,22 @@ class FileScanner:
             self.logger.error(err_msg)
             return
         
+        file_count = sum(1 for e in entries if e.is_file(follow_symlinks=False))
+        dir_count = sum(1 for e in entries if e.is_dir(follow_symlinks=False))
+        self.logger.debug(f"[DIR] {dir_path} ({file_count} files, {dir_count} subdirs)")
+        
         for entry in entries:
             try:
+                # Handle long paths on Windows (>260 chars)
+                entry_path = entry.path
+                if os.name == 'nt' and len(entry_path) > 250 and not entry_path.startswith('\\\\?\\'):
+                    entry_path = '\\\\?\\' + os.path.abspath(entry_path)
+                    self.logger.debug(f"  └─ Long path detected: {len(entry.path)} chars")
+                
                 if entry.is_file(follow_symlinks=False):
-                    self._submit_task(self._scan_file_shallow, entry.path, scan_root, archive_path)
+                    self._submit_task(self._scan_file_shallow, entry_path, scan_root, archive_path)
                 elif entry.is_dir(follow_symlinks=False):
-                    self._submit_task(self._scan_directory, entry.path, scan_root, archive_path)
+                    self._submit_task(self._scan_directory, entry_path, scan_root, archive_path)
             except PermissionError:
                 err_msg = f"Permission denied: {entry.path}"
                 with self._lock:
@@ -375,7 +425,7 @@ class FileScanner:
             
             # For files extracted from archives, analyze inline while temp dir exists
             if archive_path and not file_info.is_directory:
-                self._analyze_file_inline(file_info)
+                self._analyze_file_inline(file_info, file_path)
             
             with self._lock:
                 self.files.append(file_info)
@@ -490,6 +540,7 @@ class FileScanner:
         Extract and scan an archive, adding any nested archives back to the queue.
         """
         self._update_progress(f"Extracting: {Path(archive_path).name}")
+        self.logger.debug(f"[EXTRACT] {Path(archive_path).name} (depth={archive_depth})")
         
         try:
             with temp_extract_dir() as temp_dir:
@@ -497,6 +548,7 @@ class FileScanner:
                 
                 if is_password_protected:
                     self.logger.info(f"Password protected archive: {archive_path}")
+                    self.logger.debug(f"  └─ ⚠️  Password protected - skipping")
                     with self._lock:
                         self.password_protected_archives.append(archive_path)
                         for file_info in self.files:
@@ -506,6 +558,7 @@ class FileScanner:
                     return
                 
                 self.logger.info(f"Extracted {len(files)} files from {archive_path}")
+                self.logger.debug(f"  └─ Extracted {len(files)} files")
                 
                 try:
                     rel_archive = str(Path(archive_path).relative_to(scan_root))
@@ -525,7 +578,7 @@ class FileScanner:
                     
                     # Analyze executables/documents inline while temp dir exists
                     if not file_info.is_directory:
-                        self._analyze_file_inline(file_info)
+                        self._analyze_file_inline(file_info, extracted_file)
                     
                     with self._lock:
                         self.files.append(file_info)

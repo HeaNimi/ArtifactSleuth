@@ -708,8 +708,44 @@ def calculate_risk_score(file_info):
 │                                                         │
 │ 3. Split reports for 100k+ files                        │
 │    --split-report 50000  # 50k files per report         │
-│    └─ report_part1.html, report_part2.html, ...         │
+│    └─ report_1.html, report_2.html, ...                 │
 └─────────────────────────────────────────────────────────┘
+```
+
+### Split Report Implementation
+
+```
+┌─────────────────────────────────────────────────────────┐
+│           --split-report N Flow                          │
+├─────────────────────────────────────────────────────────┤
+│ generate_report()                                       │
+│    │                                                    │
+│    ├─ if split_threshold > 0 AND files > threshold:    │
+│    │     └─ generate_split_html_reports()              │
+│    │           │                                        │
+│    │           ├─ Calculate total_parts                 │
+│    │           │    = ceil(file_count / N)              │
+│    │           │                                        │
+│    │           └─ For each part:                        │
+│    │                 ├─ Slice files[start:end]          │
+│    │                 ├─ Generate report_{n}.html        │
+│    │                 └─ Inject part_number, total_parts │
+│    │                                                    │
+│    └─ else: generate single HTML report                 │
+└─────────────────────────────────────────────────────────┘
+
+Output Naming:
+  --output report.html --split-report 50000
+  └─ report_1.html (files 1-50,000)
+  └─ report_2.html (files 50,001-100,000)
+  └─ report_3.html (files 100,001+)
+
+Each Part Contains:
+  ├─ summary['is_split_report'] = True
+  ├─ summary['part_number'] = N (0-indexed)
+  ├─ summary['total_parts'] = total count
+  ├─ Header shows "Part X of Y"
+  └─ Navigation links to other parts
 ```
 
 ---

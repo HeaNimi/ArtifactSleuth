@@ -571,7 +571,7 @@ HTML_TEMPLATE = '''
         </div>
         
         <!-- Detail Panel (modal-style) -->
-        <div id="detailPanel" style="display:none; position:fixed; top:0; right:0; width:500px; height:100vh; background:var(--bg-card); border-left:1px solid var(--border); overflow-y:auto; z-index:1000; padding:1.5rem;">
+        <div id="detailPanel" style="display:none; position:fixed; top:0; right:0; width:550px; height:100vh; background:var(--bg-card); border-left:1px solid var(--border); overflow-y:auto; z-index:1000; padding:1.5rem; box-shadow: -2px 0 10px rgba(0,0,0,0.1);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
                 <h3 style="margin:0;">File Details</h3>
                 <button class="view-btn" onclick="closeDetails()">✕ Close</button>
@@ -843,19 +843,149 @@ HTML_TEMPLATE = '''
             if (!f) return;
             const panel = document.getElementById('detailPanel');
             const body = document.getElementById('detailBody');
-            body.innerHTML = '<div class="details-grid">' +
-                '<div class="detail-item"><div class="detail-label">Full Path</div><div class="detail-value">' + (f.path||f.relative_path||'') + '</div></div>' +
-                '<div class="detail-item"><div class="detail-label">Size</div><div class="detail-value">' + formatSize(f.size) + ' (' + (f.size||0) + ' bytes)</div></div>' +
-                '<div class="detail-item"><div class="detail-label">MIME</div><div class="detail-value">' + (f.mime_type||'-') + '</div></div>' +
-                '<div class="detail-item"><div class="detail-label">Type</div><div class="detail-value">' + (f.friendly_type||'-') + '</div></div>' +
-                '<div class="detail-item"><div class="detail-label">Created</div><div class="detail-value">' + (f.created_time||'-') + '</div></div>' +
-                '<div class="detail-item"><div class="detail-label">Modified</div><div class="detail-value">' + (f.modified_time||'-') + '</div></div>' +
-                '<div class="detail-item"><div class="detail-label">Owner</div><div class="detail-value">' + (f.owner||'-') + '</div></div>' +
-                '<div class="detail-item"><div class="detail-label">Computer</div><div class="detail-value">' + (f.computer||'-') + '</div></div>' +
-                '<div class="detail-item"><div class="detail-label">MD5</div><div class="detail-value">' + (f.md5||'-') + (f.md5 ? ' <button class="copy-btn" onclick="copyHash(\\''+f.md5+'\\',this)">📋</button>' : '') + '</div></div>' +
-                '<div class="detail-item"><div class="detail-label">SHA1</div><div class="detail-value">' + (f.sha1||'-') + (f.sha1 ? ' <button class="copy-btn" onclick="copyHash(\\''+f.sha1+'\\',this)">📋</button>' : '') + '</div></div>' +
-                '<div class="detail-item"><div class="detail-label">SHA256</div><div class="detail-value" style="word-break:break-all;">' + (f.sha256||'-') + (f.sha256 ? ' <button class="copy-btn" onclick="copyHash(\\''+f.sha256+'\\',this)">📋</button>' : '') + '</div></div>' +
-                '</div>';
+            
+            // Helper to create a list from array
+            function arrayToList(arr, emptyText) {
+                if (!arr || arr.length === 0) return '<span style="color:var(--text-muted);">' + (emptyText||'None') + '</span>';
+                return '<ul style="margin:0;padding-left:1.2rem;">' + arr.map(function(item) { return '<li>' + item + '</li>'; }).join('') + '</ul>';
+            }
+            
+            // Basic Info Section
+            let html = '<h4 style="margin:0 0 1rem 0;color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:0.5rem;">📄 File Information</h4>';
+            html += '<div class="details-grid">';
+            html += '<div class="detail-item"><div class="detail-label">Full Path</div><div class="detail-value" style="word-break:break-all;">' + (f.path||f.relative_path||'') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">Size</div><div class="detail-value">' + formatSize(f.size) + ' (' + (f.size||0) + ' bytes)</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">MIME Type</div><div class="detail-value">' + (f.mime_type||'-') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">File Type</div><div class="detail-value">' + (f.file_type||f.friendly_type||'-') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">Created</div><div class="detail-value">' + (f.created_time||'-') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">Modified</div><div class="detail-value">' + (f.modified_time||'-') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">Accessed</div><div class="detail-value">' + (f.accessed_time||'-') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">Owner</div><div class="detail-value">' + (f.owner||'-') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">Computer</div><div class="detail-value">' + (f.computer||'-') + '</div></div>';
+            if (f.archive_path) {
+                html += '<div class="detail-item"><div class="detail-label">From Archive</div><div class="detail-value">' + f.archive_path + '</div></div>';
+            }
+            if (f.extension_mismatch) {
+                html += '<div class="detail-item"><div class="detail-label">⚠️ Extension Mismatch</div><div class="detail-value" style="color:#f39c12;">Expected: ' + (f.expected_extensions||'unknown') + '</div></div>';
+            }
+            html += '</div>';
+            
+            // Risk Assessment Section
+            html += '<h4 style="margin:1.5rem 0 1rem 0;color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:0.5rem;">⚠️ Risk Assessment</h4>';
+            html += '<div class="details-grid">';
+            const riskColor = (f.risk_score||0) >= 70 ? '#e74c3c' : (f.risk_score||0) >= 30 ? '#f39c12' : '#27ae60';
+            html += '<div class="detail-item"><div class="detail-label">Risk Score</div><div class="detail-value"><span style="font-weight:bold;font-size:1.2rem;color:' + riskColor + ';">' + (f.risk_score||0) + '</span>/100</div></div>';
+            html += '</div>';
+            html += '<div class="detail-item" style="margin-top:0.5rem;"><div class="detail-label">Risk Factors</div><div class="detail-value">' + arrayToList(f.risk_reasons, 'No risk factors identified') + '</div></div>';
+            
+            // Hashes Section
+            html += '<h4 style="margin:1.5rem 0 1rem 0;color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:0.5rem;">🔐 File Hashes</h4>';
+            html += '<div class="details-grid">';
+            html += '<div class="detail-item"><div class="detail-label">MD5</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.md5||'-') + (f.md5 ? ' <button class="copy-btn" onclick="copyHash(\\''+f.md5+'\\',this)">📋</button>' : '') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">SHA1</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.sha1||'-') + (f.sha1 ? ' <button class="copy-btn" onclick="copyHash(\\''+f.sha1+'\\',this)">📋</button>' : '') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">SHA256</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;word-break:break-all;">' + (f.sha256||'-') + (f.sha256 ? ' <button class="copy-btn" onclick="copyHash(\\''+f.sha256+'\\',this)">📋</button>' : '') + '</div></div>';
+            html += '</div>';
+            
+            // VirusTotal Section (if available)
+            if (f.vt_detected !== null || f.vt_link) {
+                html += '<h4 style="margin:1.5rem 0 1rem 0;color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:0.5rem;">🛡️ VirusTotal Results</h4>';
+                html += '<div class="details-grid">';
+                if (f.vt_detected === true) {
+                    html += '<div class="detail-item"><div class="detail-label">Detection</div><div class="detail-value" style="color:#e74c3c;font-weight:bold;">⚠️ DETECTED - ' + (f.vt_detection_ratio||'') + '</div></div>';
+                } else if (f.vt_detected === false) {
+                    html += '<div class="detail-item"><div class="detail-label">Detection</div><div class="detail-value" style="color:#27ae60;">✓ Clean</div></div>';
+                }
+                if (f.vt_link) {
+                    html += '<div class="detail-item"><div class="detail-label">Report</div><div class="detail-value"><a href="' + f.vt_link + '" target="_blank" style="color:var(--primary);">View on VirusTotal →</a></div></div>';
+                }
+                if (f.vt_error) {
+                    html += '<div class="detail-item"><div class="detail-label">Error</div><div class="detail-value" style="color:#e74c3c;">' + f.vt_error + '</div></div>';
+                }
+                html += '</div>';
+            }
+            
+            // PE/Executable Analysis Section
+            const hasExeAnalysis = (f.exe_domains && f.exe_domains.length) || (f.exe_ips && f.exe_ips.length) || (f.exe_urls && f.exe_urls.length) || (f.exe_suspicious_imports && f.exe_suspicious_imports.length) || f.exe_company || f.is_signed !== null;
+            if (hasExeAnalysis) {
+                html += '<h4 style="margin:1.5rem 0 1rem 0;color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:0.5rem;">⚙️ Executable Analysis</h4>';
+                
+                // PE Metadata
+                if (f.exe_company || f.exe_product || f.exe_description || f.exe_version) {
+                    html += '<div class="details-grid">';
+                    if (f.exe_company) html += '<div class="detail-item"><div class="detail-label">Company</div><div class="detail-value">' + f.exe_company + '</div></div>';
+                    if (f.exe_product) html += '<div class="detail-item"><div class="detail-label">Product</div><div class="detail-value">' + f.exe_product + '</div></div>';
+                    if (f.exe_description) html += '<div class="detail-item"><div class="detail-label">Description</div><div class="detail-value">' + f.exe_description + '</div></div>';
+                    if (f.exe_version) html += '<div class="detail-item"><div class="detail-label">Version</div><div class="detail-value">' + f.exe_version + '</div></div>';
+                    html += '</div>';
+                }
+                
+                // Digital Signature
+                html += '<div class="details-grid" style="margin-top:0.5rem;">';
+                if (f.is_signed === true) {
+                    html += '<div class="detail-item"><div class="detail-label">Digital Signature</div><div class="detail-value" style="color:#27ae60;">✓ Signed</div></div>';
+                    if (f.sig_subject) html += '<div class="detail-item"><div class="detail-label">Signer</div><div class="detail-value">' + f.sig_subject + '</div></div>';
+                    if (f.sig_issuer) html += '<div class="detail-item"><div class="detail-label">Issuer</div><div class="detail-value">' + f.sig_issuer + '</div></div>';
+                } else if (f.is_signed === false) {
+                    html += '<div class="detail-item"><div class="detail-label">Digital Signature</div><div class="detail-value" style="color:#f39c12;">✗ Not Signed</div></div>';
+                }
+                html += '</div>';
+                
+                // IOCs - Network Indicators
+                html += '<div style="margin-top:1rem;"><div class="detail-label" style="margin-bottom:0.5rem;">🌐 Network IOCs (Domains)</div><div class="detail-value">' + arrayToList(f.exe_domains, 'None found') + '</div></div>';
+                html += '<div style="margin-top:0.75rem;"><div class="detail-label" style="margin-bottom:0.5rem;">📍 Network IOCs (IP Addresses)</div><div class="detail-value">' + arrayToList(f.exe_ips, 'None found') + '</div></div>';
+                html += '<div style="margin-top:0.75rem;"><div class="detail-label" style="margin-bottom:0.5rem;">🔗 Network IOCs (URLs)</div><div class="detail-value">' + arrayToList(f.exe_urls, 'None found') + '</div></div>';
+                
+                // Suspicious Imports
+                html += '<div style="margin-top:0.75rem;"><div class="detail-label" style="margin-bottom:0.5rem;">🚨 Suspicious API Imports</div><div class="detail-value">' + arrayToList(f.exe_suspicious_imports, 'None found') + '</div></div>';
+                
+                if (f.exe_analysis_error) {
+                    html += '<div style="margin-top:0.75rem;"><div class="detail-label">Analysis Error</div><div class="detail-value" style="color:#e74c3c;">' + f.exe_analysis_error + '</div></div>';
+                }
+            }
+            
+            // Document Analysis Section (PDF, Office)
+            const hasDocAnalysis = f.doc_has_macros !== null || f.doc_has_javascript !== null || (f.doc_suspicious_elements && f.doc_suspicious_elements.length) || f.doc_author;
+            if (hasDocAnalysis) {
+                html += '<h4 style="margin:1.5rem 0 1rem 0;color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:0.5rem;">📑 Document Analysis</h4>';
+                
+                // Security Indicators
+                html += '<div class="details-grid">';
+                if (f.doc_has_macros !== null) {
+                    const macroStyle = f.doc_has_macros ? 'color:#e74c3c;font-weight:bold;' : 'color:#27ae60;';
+                    html += '<div class="detail-item"><div class="detail-label">VBA Macros</div><div class="detail-value" style="' + macroStyle + '">' + (f.doc_has_macros ? '⚠️ PRESENT' : '✓ None') + '</div></div>';
+                }
+                if (f.doc_has_javascript !== null) {
+                    const jsStyle = f.doc_has_javascript ? 'color:#e74c3c;font-weight:bold;' : 'color:#27ae60;';
+                    html += '<div class="detail-item"><div class="detail-label">JavaScript</div><div class="detail-value" style="' + jsStyle + '">' + (f.doc_has_javascript ? '⚠️ PRESENT' : '✓ None') + '</div></div>';
+                }
+                html += '</div>';
+                
+                // Suspicious Elements
+                if (f.doc_suspicious_elements && f.doc_suspicious_elements.length) {
+                    html += '<div style="margin-top:0.75rem;"><div class="detail-label" style="margin-bottom:0.5rem;color:#e74c3c;">🚨 Suspicious Elements</div><div class="detail-value">' + arrayToList(f.doc_suspicious_elements) + '</div></div>';
+                }
+                
+                // Document Properties
+                if (f.doc_author || f.doc_company || f.doc_title || f.doc_last_modified_by) {
+                    html += '<div style="margin-top:1rem;"><div class="detail-label" style="margin-bottom:0.5rem;">Document Properties</div></div>';
+                    html += '<div class="details-grid">';
+                    if (f.doc_author) html += '<div class="detail-item"><div class="detail-label">Author</div><div class="detail-value">' + f.doc_author + '</div></div>';
+                    if (f.doc_last_modified_by) html += '<div class="detail-item"><div class="detail-label">Last Modified By</div><div class="detail-value">' + f.doc_last_modified_by + '</div></div>';
+                    if (f.doc_company) html += '<div class="detail-item"><div class="detail-label">Company</div><div class="detail-value">' + f.doc_company + '</div></div>';
+                    if (f.doc_title) html += '<div class="detail-item"><div class="detail-label">Title</div><div class="detail-value">' + f.doc_title + '</div></div>';
+                    if (f.doc_subject) html += '<div class="detail-item"><div class="detail-label">Subject</div><div class="detail-value">' + f.doc_subject + '</div></div>';
+                    if (f.doc_keywords) html += '<div class="detail-item"><div class="detail-label">Keywords</div><div class="detail-value">' + f.doc_keywords + '</div></div>';
+                    if (f.doc_created) html += '<div class="detail-item"><div class="detail-label">Doc Created</div><div class="detail-value">' + f.doc_created + '</div></div>';
+                    if (f.doc_modified) html += '<div class="detail-item"><div class="detail-label">Doc Modified</div><div class="detail-value">' + f.doc_modified + '</div></div>';
+                    html += '</div>';
+                }
+                
+                if (f.doc_analysis_error) {
+                    html += '<div style="margin-top:0.75rem;"><div class="detail-label">Analysis Error</div><div class="detail-value" style="color:#e74c3c;">' + f.doc_analysis_error + '</div></div>';
+                }
+            }
+            
+            body.innerHTML = html;
             panel.style.display = 'block';
         }
         function closeDetails() { document.getElementById('detailPanel').style.display = 'none'; }

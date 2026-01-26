@@ -84,6 +84,7 @@ python main.py /path/to/usb --exclude-archives .apk,.jar --output report.html
 | `--output`, `-o` | Output file path | `report.html` |
 | `--format`, `-f` | Output format (`html` or `csv`) | `html` |
 | `--log` | Log file path (enables detailed logging) | None |
+| `-v`, `--verbose` | Verbose mode - show detailed logging of file analysis | False |
 | `--vt-key` | VirusTotal API key | None |
 | `--vt-rate` | VirusTotal rate limit (lookups/min) | 4 |
 | `--no-vt` | Skip VirusTotal lookups | False |
@@ -92,6 +93,46 @@ python main.py /path/to/usb --exclude-archives .apk,.jar --output report.html
 | `--exclude-archives` | Comma-separated archive extensions to skip (e.g., `.apk,.jar,.aar`) | None |
 | `--split-report` | Split HTML report into N files each | 0 (disabled) |
 | `--quiet`, `-q` | Minimal output | False |
+
+### Verbose Mode
+
+Use `-v` or `--verbose` to see detailed logging during scan:
+
+```bash
+python main.py E:\ -v --no-vt
+```
+
+This shows:
+- Directory scanning progress (`[DIR]` entries)
+- Each file scanned (`[SCAN]` with size and MIME type)
+- Archive extraction progress (`[EXTRACT]`)
+- PE/Document analysis results (`[ANALYZE]`)
+- IOC findings (domains, IPs, URLs, suspicious imports)
+
+### Split Report Option
+
+For very large scans (100k+ files), use `--split-report` to generate multiple HTML files:
+
+```bash
+# Split into reports with 50,000 files each
+python main.py E:\ --output report.html --split-report 50000
+```
+
+**Output:**
+- `report_1.html` (files 1-50,000)
+- `report_2.html` (files 50,001-100,000)
+- etc.
+
+Each report is self-contained with:
+- Part indicator in header (e.g., "Part 1 of 3")
+- Navigation links to other parts
+- Full search/filter functionality within that part
+- Independent pagination
+
+**When to use:**
+- Browser becomes slow/unresponsive with large reports
+- Files exceed 500k+ (recommended: `--split-report 100000`)
+- Need to share portions of a large scan
 
 ## License
 

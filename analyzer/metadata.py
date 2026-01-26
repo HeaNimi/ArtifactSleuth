@@ -671,8 +671,11 @@ def get_file_metadata(file_path: str, scan_root: str, archive_path: Optional[str
     # Get computer name
     computer = platform.node()
     
-    # Get parent folder
-    parent_folder = str(path.parent)
+    # Get parent folder - for extracted files, show archive path instead of temp folder
+    if archive_path:
+        parent_folder = archive_path
+    else:
+        parent_folder = str(path.parent)
     
     # Get file type using python-magic if available
     mime_type = None
@@ -704,8 +707,15 @@ def get_file_metadata(file_path: str, scan_root: str, archive_path: Optional[str
     # Extract Executable information (using pywin32)
     exe_info = extract_exe_info(file_path)
     
+    # For files extracted from archives, use the archive-based path for display
+    # The actual file_path is needed for analysis (temp location), but path field shows logical location
+    if archive_path:
+        display_path = f"{archive_path}/{path.name}"
+    else:
+        display_path = str(path)
+    
     return FileInfo(
-        path=str(path),
+        path=display_path,
         name=path.name,
         relative_path=relative_path,
         size=size,
