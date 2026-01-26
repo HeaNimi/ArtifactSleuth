@@ -1,65 +1,4 @@
-"""
-Report generation module.
-Generates CSV and HTML reports from scan results.
-"""
 
-import csv
-import json
-from datetime import datetime
-from pathlib import Path
-from typing import List, Dict, Any
-
-from jinja2 import Template
-
-from .metadata import FileInfo
-
-
-def generate_csv_report(
-    files: List[FileInfo],
-    summary: Dict[str, Any],
-    output_path: str
-) -> None:
-    """
-    Generate a CSV report from scan results.
-    
-    Args:
-        files: List of FileInfo objects
-        summary: Scan summary dictionary
-        output_path: Path to save the CSV file
-    """
-    fieldnames = [
-        'relative_path', 'name', 'size', 'size_human', 
-        'created_time', 'modified_time', 'mime_type',
-        'extension_mismatch', 'expected_extensions',
-        'friendly_type', 'attributes', 'computer', 'parent_folder',
-        'owner', 'doc_author', 'doc_last_modified_by', 'doc_company',
-        'exe_company', 'exe_product', 'exe_description', 'exe_version', 'is_signed',
-        'md5', 'sha1', 'sha256',
-        'vt_detected', 'vt_detection_ratio', 'vt_link',
-        'doc_has_macros', 'doc_has_javascript', 'doc_suspicious_elements',
-        'exe_domains', 'exe_ips', 'exe_urls', 'exe_suspicious_imports',
-        'risk_score', 'risk_reasons',
-        'is_archive', 'is_password_protected', 'archive_path'
-    ]
-    
-    with open(output_path, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
-        writer.writeheader()
-        
-        for file_info in files:
-            row = file_info.to_dict()
-            # Convert lists to strings for CSV
-            row['doc_suspicious_elements'] = '; '.join(row.get('doc_suspicious_elements', []))
-            row['exe_domains'] = '; '.join(row.get('exe_domains', []))
-            row['exe_ips'] = '; '.join(row.get('exe_ips', []))
-            row['exe_urls'] = '; '.join(row.get('exe_urls', []))
-            row['exe_suspicious_imports'] = '; '.join(row.get('exe_suspicious_imports', []))
-            row['risk_reasons'] = '; '.join(row.get('risk_reasons', []))
-            writer.writerow(row)
-
-
-# HTML Template with dark/light mode toggle and SHA256 copy button
-HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
 <head>
@@ -527,7 +466,7 @@ HTML_TEMPLATE = '''
             <div>
                 <h1>🔍 ArtifactSleuth Forensic Report</h1>
                 <div class="header-meta">
-                    Generated: {{ generated_time }} | Scanned: {{ scan_path }}
+                    Generated: 2026-01-26 18:14:46 | Scanned: C:\Code\ArtifactSleuth\test_data
                 </div>
             </div>
             <button class="theme-toggle" onclick="toggleTheme()">
@@ -539,46 +478,37 @@ HTML_TEMPLATE = '''
         <div class="summary-grid">
             <div class="summary-card">
                 <h3>Total Files</h3>
-                <div class="value">{{ summary.total_files }}</div>
+                <div class="value">9</div>
             </div>
             <div class="summary-card">
                 <h3>Total Size</h3>
-                <div class="value">{{ summary.total_size_human }}</div>
+                <div class="value">892.4 KB</div>
             </div>
             <div class="summary-card danger">
                 <h3>High Risk</h3>
-                <div class="value">{{ summary.high_risk_count }}</div>
+                <div class="value">0</div>
             </div>
             <div class="summary-card warning">
                 <h3>Medium Risk</h3>
-                <div class="value">{{ summary.medium_risk_count }}</div>
+                <div class="value">0</div>
             </div>
             <div class="summary-card success">
                 <h3>Low Risk</h3>
-                <div class="value">{{ summary.low_risk_count }}</div>
+                <div class="value">2</div>
             </div>
             <div class="summary-card">
                 <h3>Errors</h3>
-                <div class="value">{{ summary.errors }}</div>
+                <div class="value">0</div>
             </div>
         </div>
         
-        {% if summary.password_protected_archive_paths %}
-        <div class="password-protected">
-            ⚠️ <strong>Password Protected Archives (skipped):</strong>
-            <ul style="margin-top: 0.5rem; margin-left: 1.5rem;">
-                {% for path in summary.password_protected_archive_paths %}
-                <li>{{ path }}</li>
-                {% endfor %}
-            </ul>
-        </div>
-        {% endif %}
+        
         
         <!-- All Files (Optimized for 100k+ files) -->
         <div class="section">
             <div class="section-header" onclick="toggleSection(this)">
                 <h2>📁 All Files</h2>
-                <span class="badge">{{ files | length }}</span>
+                <span class="badge">9</span>
             </div>
             <div class="section-content">
                 <div class="filter-bar" style="gap: 0.75rem; flex-wrap: wrap;">
@@ -631,70 +561,103 @@ HTML_TEMPLATE = '''
         </div>
         
         <!-- High Risk Files -->
-        {% set high_risk_files = files | selectattr('risk_score', 'ge', 50) | list %}
-        {% if high_risk_files %}
-        <div class="section">
-            <div class="section-header" onclick="toggleSection(this)">
-                <h2>🚨 High Risk Files</h2>
-                <span class="badge">{{ high_risk_files | length }}</span>
-            </div>
-            <div class="section-content collapsed">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>File</th>
-                            <th>Risk</th>
-                            <th>VT Detection</th>
-                            <th>Reasons</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for file in high_risk_files %}
-                        <tr>
-                            <td>{{ file.relative_path }}</td>
-                            <td><span class="risk-badge risk-high">{{ file.risk_score }}</span></td>
-                            <td>
-                                {% if file.vt_link %}
-                                <a href="{{ file.vt_link }}" target="_blank" class="vt-link">{{ file.vt_detection_ratio or 'Check' }}</a>
-                                {% else %}
-                                -
-                                {% endif %}
-                            </td>
-                            <td>
-                                {% for reason in file.risk_reasons %}
-                                <span class="tag suspicious">{{ reason }}</span>
-                                {% endfor %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        {% endif %}
+        
+        
         
         <!-- IOC Summary -->
-        {% set files_with_iocs = files | selectattr('exe_domains') | list + files | selectattr('exe_ips') | list %}
-        {% set all_domains = [] %}
-        {% set all_ips = [] %}
-        {% for file in files %}
-            {% for domain in file.exe_domains %}
-                {% if domain not in all_domains %}
-                    {% set _ = all_domains.append(domain) %}
-                {% endif %}
-            {% endfor %}
-            {% for ip in file.exe_ips %}
-                {% if ip not in all_ips %}
-                    {% set _ = all_ips.append(ip) %}
-                {% endif %}
-            {% endfor %}
-        {% endfor %}
         
-        {% if all_domains or all_ips %}
+        
+        
+        
+            
+                
+                    
+                
+            
+                
+                    
+                
+            
+                
+                    
+                
+            
+                
+                    
+                
+            
+                
+                    
+                
+            
+                
+                    
+                
+            
+                
+                    
+                
+            
+                
+                    
+                
+            
+                
+                    
+                
+            
+                
+                    
+                
+            
+            
+                
+                    
+                
+            
+                
+                    
+                
+            
+                
+                    
+                
+            
+        
+            
+            
+                
+                    
+                
+            
+        
+            
+            
+        
+            
+            
+        
+            
+            
+        
+            
+            
+        
+            
+            
+        
+            
+            
+        
+            
+            
+        
+        
+        
         <div class="section">
             <div class="section-header" onclick="toggleSection(this)">
                 <h2>🌐 Network Indicators (IOCs)</h2>
-                <span class="badge">{{ (all_domains | length) + (all_ips | length) }}</span>
+                <span class="badge">14</span>
             </div>
             <div class="section-content collapsed">
                 <div style="display:flex;gap:1rem;margin-bottom:1rem;align-items:center;flex-wrap:wrap;">
@@ -723,26 +686,10 @@ HTML_TEMPLATE = '''
                 </div>
             </div>
         </div>
-        {% endif %}
+        
         
         <!-- Errors -->
-        {% if summary.error_messages %}
-        <div class="section">
-            <div class="section-header" onclick="toggleSection(this)">
-                <h2>⚠️ Errors</h2>
-                <span class="badge">{{ summary.errors }}</span>
-            </div>
-            <div class="section-content collapsed">
-                <div class="error-list">
-                    <ul>
-                        {% for error in summary.error_messages %}
-                        <li>{{ error }}</li>
-                        {% endfor %}
-                    </ul>
-                </div>
-            </div>
-        </div>
-        {% endif %}
+        
         
         <!-- File Type Breakdown -->
         <div class="section">
@@ -758,19 +705,49 @@ HTML_TEMPLATE = '''
                         </tr>
                     </thead>
                     <tbody>
-                        {% for ext, count in summary.extensions.items() %}
+                        
                         <tr>
-                            <td>{{ ext }}</td>
-                            <td>{{ count }}</td>
+                            <td>.txt</td>
+                            <td>2</td>
                         </tr>
-                        {% endfor %}
+                        
+                        <tr>
+                            <td>.exe</td>
+                            <td>2</td>
+                        </tr>
+                        
+                        <tr>
+                            <td>.zip</td>
+                            <td>1</td>
+                        </tr>
+                        
+                        <tr>
+                            <td>.md</td>
+                            <td>1</td>
+                        </tr>
+                        
+                        <tr>
+                            <td>.pdf</td>
+                            <td>1</td>
+                        </tr>
+                        
+                        <tr>
+                            <td>.chm</td>
+                            <td>1</td>
+                        </tr>
+                        
+                        <tr>
+                            <td>.ini</td>
+                            <td>1</td>
+                        </tr>
+                        
                     </tbody>
                 </table>
             </div>
         </div>
     </div>
     
-    <script id="file-data" type="application/json">{{ files_json }}</script>
+    <script id="file-data" type="application/json">[{"path": "C:\\Code\\ArtifactSleuth\\test_data\\tftpd64_portable_v4.74\\tftpd64.exe", "name": "tftpd64.exe", "relative_path": "tftpd64_portable_v4.74\\tftpd64.exe", "size": 439376, "size_human": "429.1 KB", "created_time": "2026-01-23T20:52:20.858000", "modified_time": "2025-10-14T18:34:59.674000", "accessed_time": "2026-01-26T16:49:18.205000", "is_directory": false, "is_archive": false, "is_password_protected": false, "archive_path": null, "mime_type": "application/x-dosexec", "file_type": "PE32+ executable (GUI) x86-64, for MS Windows", "friendly_type": "Application", "permissions": "-rwxrwxrwx", "owner": "NOTBADLEN\\maitn", "attributes": "A", "computer": "NotBadLEN", "parent_folder": "C:\\Code\\ArtifactSleuth\\test_data\\tftpd64_portable_v4.74", "extension_mismatch": false, "expected_extensions": null, "doc_author": null, "doc_last_modified_by": null, "doc_title": null, "doc_subject": null, "doc_keywords": null, "doc_created": null, "doc_modified": null, "doc_company": null, "doc_manager": null, "doc_category": null, "doc_comments": null, "md5": "00e1bc2fed3e8be6da0e1ca62b4c9b7a", "sha1": "6874d7b0925255ed9e99c927be0436a76644be2f", "sha256": "43a8a79001510fa969ae31521aef550ff4c9c7771e903792b60a499ecf48b388", "vt_detected": null, "vt_detection_ratio": null, "vt_link": null, "vt_error": null, "doc_has_macros": null, "doc_has_javascript": null, "doc_suspicious_elements": [], "doc_analysis_error": null, "exe_domains": ["ccsca2021.crl.certum.pl", "crl.certum.pl", "github.com", "jounin.net", "repository.certum.pl", "subca.crl.certum.pl", "subca.repository.certum.pl", "tftpd64.com", "www.certum.pl", "www.tftpd64.com"], "exe_ips": ["1.2.3.4", "4.5.6.7", "4.74.0.0"], "exe_urls": ["http://ccsca2021.crl.certum.pl/ccsca2021.crl0s", "http://ccsca2021.ocsp-certum.com05", "http://crl.certum.pl/ctnca.crl0k", "http://crl.certum.pl/ctnca2.crl0l", "http://repository.certum.pl/ccsca2021.cer0", "http://repository.certum.pl/ctnca.cer09", "http://repository.certum.pl/ctnca2.cer09", "http://subca.crl.certum.pl/ctsca2021.crl0", "http://subca.ocsp-certum.com0", "http://subca.ocsp-certum.com01", "http://subca.ocsp-certum.com02", "http://subca.repository.certum.pl/ctsca2021.cer0(", "http://www.certum.pl/CPS0", "https://github.com/PJO2/tftpd64", "https://tftpd64.com,", "https://www.certum.pl/CPS0", "https://www.tftpd64.com"], "exe_suspicious_imports": ["WSAStartup: Network initialization", "socket: Socket creation", "connect: Network connection", "recv: Network receive", "send: Network send", "VirtualProtect: Memory protection changes", "CreateFileA: File access", "DeleteFileA: File deletion", "GetProcAddress: Dynamic function resolution", "IsDebuggerPresent: Debugger detection", "CreateFileW: File access", "RegDeleteKeyA: Registry deletion", "RegSetValueExA: Registry modification", "RegOpenKeyExA: Registry access"], "exe_analysis_error": null, "signature_info": {"is_signed": false, "subject": null, "issuer": null, "status": null, "has_signature_directory": true}, "exe_company": null, "exe_product": null, "exe_description": null, "exe_version": null, "is_signed": false, "sig_subject": null, "sig_issuer": null, "defender_scanned": null, "defender_detected": null, "defender_threat_name": null, "defender_error": null, "risk_score": 21, "risk_reasons": ["Suspicious imports: 14 (unsigned)", "Network indicators: 10 domains, 3 IPs", "Executable file: .exe"]}, {"path": "C:\\Code\\ArtifactSleuth\\test_data\\xcopy.exe", "name": "xcopy.exe", "relative_path": "xcopy.exe", "size": 73728, "size_human": "72.0 KB", "created_time": "2026-01-23T20:59:45.629000", "modified_time": "2024-04-01T10:22:16.591000", "accessed_time": "2026-01-26T16:49:17.779000", "is_directory": false, "is_archive": false, "is_password_protected": false, "archive_path": null, "mime_type": "application/x-dosexec", "file_type": "PE32+ executable (console) x86-64, for MS Windows", "friendly_type": "Application", "permissions": "-rwxrwxrwx", "owner": "NOTBADLEN\\maitn", "attributes": "A", "computer": "NotBadLEN", "parent_folder": "C:\\Code\\ArtifactSleuth\\test_data", "extension_mismatch": false, "expected_extensions": null, "doc_author": null, "doc_last_modified_by": null, "doc_title": null, "doc_subject": null, "doc_keywords": null, "doc_created": null, "doc_modified": null, "doc_company": null, "doc_manager": null, "doc_category": null, "doc_comments": null, "md5": "2e3735ce788ac354393e7d754174e6d5", "sha1": "5d2a2636912afcb3e92721133adfff981af61af2", "sha256": "96e01cdc713a4306abb3b58aef982d67a209dddadc8cff5c4c77a5595f712828", "vt_detected": null, "vt_detection_ratio": null, "vt_link": null, "vt_error": null, "doc_has_macros": null, "doc_has_javascript": null, "doc_suspicious_elements": [], "doc_analysis_error": null, "exe_domains": [], "exe_ips": ["5.1.0.0"], "exe_urls": [], "exe_suspicious_imports": [], "exe_analysis_error": null, "signature_info": {"is_signed": false, "subject": null, "issuer": null, "status": null, "has_signature_directory": false}, "exe_company": null, "exe_product": null, "exe_description": null, "exe_version": null, "is_signed": false, "sig_subject": null, "sig_issuer": null, "defender_scanned": null, "defender_detected": null, "defender_threat_name": null, "defender_error": null, "risk_score": 3, "risk_reasons": ["Executable file: .exe"]}, {"path": "C:\\Code\\ArtifactSleuth\\test_data\\archive.zip", "name": "archive.zip", "relative_path": "archive.zip", "size": 137, "size_human": "137.0 B", "created_time": "2026-01-23T13:23:02.408000", "modified_time": "2026-01-23T13:23:02.469000", "accessed_time": "2026-01-26T16:49:17.734000", "is_directory": false, "is_archive": true, "is_password_protected": false, "archive_path": null, "mime_type": "application/zip", "file_type": "Zip archive data, at least v2.0 to extract", "friendly_type": "zip Archive", "permissions": "-rw-rw-rw-", "owner": "NOTBADLEN\\maitn", "attributes": "A", "computer": "NotBadLEN", "parent_folder": "C:\\Code\\ArtifactSleuth\\test_data", "extension_mismatch": false, "expected_extensions": null, "doc_author": null, "doc_last_modified_by": null, "doc_title": null, "doc_subject": null, "doc_keywords": null, "doc_created": null, "doc_modified": null, "doc_company": null, "doc_manager": null, "doc_category": null, "doc_comments": null, "md5": null, "sha1": null, "sha256": null, "vt_detected": null, "vt_detection_ratio": null, "vt_link": null, "vt_error": null, "doc_has_macros": null, "doc_has_javascript": null, "doc_suspicious_elements": [], "doc_analysis_error": null, "exe_domains": [], "exe_ips": [], "exe_urls": [], "exe_suspicious_imports": [], "exe_analysis_error": null, "signature_info": {}, "exe_company": null, "exe_product": null, "exe_description": null, "exe_version": null, "is_signed": false, "sig_subject": null, "sig_issuer": null, "defender_scanned": null, "defender_detected": null, "defender_threat_name": null, "defender_error": null, "risk_score": 0, "risk_reasons": []}, {"path": "C:\\Code\\ArtifactSleuth\\test_data\\readme.md", "name": "readme.md", "relative_path": "readme.md", "size": 14, "size_human": "14.0 B", "created_time": "2026-01-23T13:22:53.505000", "modified_time": "2026-01-23T13:22:53.505000", "accessed_time": "2026-01-26T16:49:17.729000", "is_directory": false, "is_archive": false, "is_password_protected": false, "archive_path": null, "mime_type": "text/plain", "file_type": "ASCII text, with CRLF line terminators", "friendly_type": ".MD File", "permissions": "-rw-rw-rw-", "owner": "NOTBADLEN\\maitn", "attributes": "A", "computer": "NotBadLEN", "parent_folder": "C:\\Code\\ArtifactSleuth\\test_data", "extension_mismatch": false, "expected_extensions": null, "doc_author": null, "doc_last_modified_by": null, "doc_title": null, "doc_subject": null, "doc_keywords": null, "doc_created": null, "doc_modified": null, "doc_company": null, "doc_manager": null, "doc_category": null, "doc_comments": null, "md5": null, "sha1": null, "sha256": null, "vt_detected": null, "vt_detection_ratio": null, "vt_link": null, "vt_error": null, "doc_has_macros": null, "doc_has_javascript": null, "doc_suspicious_elements": [], "doc_analysis_error": null, "exe_domains": [], "exe_ips": [], "exe_urls": [], "exe_suspicious_imports": [], "exe_analysis_error": null, "signature_info": {}, "exe_company": null, "exe_product": null, "exe_description": null, "exe_version": null, "is_signed": false, "sig_subject": null, "sig_issuer": null, "defender_scanned": null, "defender_detected": null, "defender_threat_name": null, "defender_error": null, "risk_score": 0, "risk_reasons": []}, {"path": "C:\\Code\\ArtifactSleuth\\test_data\\test.txt", "name": "test.txt", "relative_path": "test.txt", "size": 23, "size_human": "23.0 B", "created_time": "2026-01-23T13:22:53.501000", "modified_time": "2026-01-23T13:22:53.505000", "accessed_time": "2026-01-26T16:49:17.728000", "is_directory": false, "is_archive": false, "is_password_protected": false, "archive_path": null, "mime_type": "text/plain", "file_type": "ASCII text, with CRLF line terminators", "friendly_type": ".TXT File", "permissions": "-rw-rw-rw-", "owner": "NOTBADLEN\\maitn", "attributes": "A", "computer": "NotBadLEN", "parent_folder": "C:\\Code\\ArtifactSleuth\\test_data", "extension_mismatch": false, "expected_extensions": null, "doc_author": null, "doc_last_modified_by": null, "doc_title": null, "doc_subject": null, "doc_keywords": null, "doc_created": null, "doc_modified": null, "doc_company": null, "doc_manager": null, "doc_category": null, "doc_comments": null, "md5": null, "sha1": null, "sha256": null, "vt_detected": null, "vt_detection_ratio": null, "vt_link": null, "vt_error": null, "doc_has_macros": null, "doc_has_javascript": null, "doc_suspicious_elements": [], "doc_analysis_error": null, "exe_domains": [], "exe_ips": [], "exe_urls": [], "exe_suspicious_imports": [], "exe_analysis_error": null, "signature_info": {}, "exe_company": null, "exe_product": null, "exe_description": null, "exe_version": null, "is_signed": false, "sig_subject": null, "sig_issuer": null, "defender_scanned": null, "defender_detected": null, "defender_threat_name": null, "defender_error": null, "risk_score": 0, "risk_reasons": []}, {"path": "C:\\Code\\ArtifactSleuth\\test_data\\tftpd64_portable_v4.74\\EUPL-EN.pdf", "name": "EUPL-EN.pdf", "relative_path": "tftpd64_portable_v4.74\\EUPL-EN.pdf", "size": 34312, "size_human": "33.5 KB", "created_time": "2026-01-23T20:52:20.809000", "modified_time": "2025-06-24T12:40:59.741000", "accessed_time": "2026-01-26T16:49:17.743000", "is_directory": false, "is_archive": false, "is_password_protected": false, "archive_path": null, "mime_type": "application/pdf", "file_type": "PDF document, version 1.4", "friendly_type": ".PDF File", "permissions": "-rw-rw-rw-", "owner": "NOTBADLEN\\maitn", "attributes": "A", "computer": "NotBadLEN", "parent_folder": "C:\\Code\\ArtifactSleuth\\test_data\\tftpd64_portable_v4.74", "extension_mismatch": false, "expected_extensions": null, "doc_author": null, "doc_last_modified_by": null, "doc_title": null, "doc_subject": null, "doc_keywords": null, "doc_created": null, "doc_modified": null, "doc_company": null, "doc_manager": null, "doc_category": null, "doc_comments": null, "md5": "254b5ddbc15269e72ba3a0508681a70c", "sha1": "2263ae4c0b71bf7be09707d8ffe1176807e8c69e", "sha256": "cd5d9e2a925d8daa92d083fd8c1cea48df1bcfffd857f4f93e2148fddc5001ec", "vt_detected": null, "vt_detection_ratio": null, "vt_link": null, "vt_error": null, "doc_has_macros": false, "doc_has_javascript": false, "doc_suspicious_elements": [], "doc_analysis_error": null, "exe_domains": [], "exe_ips": [], "exe_urls": [], "exe_suspicious_imports": [], "exe_analysis_error": null, "signature_info": {}, "exe_company": null, "exe_product": null, "exe_description": null, "exe_version": null, "is_signed": false, "sig_subject": null, "sig_issuer": null, "defender_scanned": null, "defender_detected": null, "defender_threat_name": null, "defender_error": null, "risk_score": 0, "risk_reasons": []}, {"path": "C:\\Code\\ArtifactSleuth\\test_data\\tftpd64_portable_v4.74\\tftpd32.chm", "name": "tftpd32.chm", "relative_path": "tftpd64_portable_v4.74\\tftpd32.chm", "size": 364722, "size_human": "356.2 KB", "created_time": "2026-01-23T20:52:20.828000", "modified_time": "2025-06-24T10:13:27.018000", "accessed_time": "2026-01-26T16:49:17.714000", "is_directory": false, "is_archive": false, "is_password_protected": false, "archive_path": null, "mime_type": "application/octet-stream", "file_type": "MS Windows HtmlHelp Data", "friendly_type": "Compiled HTML Help file", "permissions": "-rw-rw-rw-", "owner": "NOTBADLEN\\maitn", "attributes": "A", "computer": "NotBadLEN", "parent_folder": "C:\\Code\\ArtifactSleuth\\test_data\\tftpd64_portable_v4.74", "extension_mismatch": false, "expected_extensions": null, "doc_author": null, "doc_last_modified_by": null, "doc_title": null, "doc_subject": null, "doc_keywords": null, "doc_created": null, "doc_modified": null, "doc_company": null, "doc_manager": null, "doc_category": null, "doc_comments": null, "md5": "de0095e371874836fb50cd3400d7b204", "sha1": "8a1000443a71417c6233f277b87ca6585bebca2a", "sha256": "810a0f52703d051b30d5ecd219c72b0599964de34d1c1912367271c87d4725bf", "vt_detected": null, "vt_detection_ratio": null, "vt_link": null, "vt_error": null, "doc_has_macros": null, "doc_has_javascript": null, "doc_suspicious_elements": [], "doc_analysis_error": null, "exe_domains": [], "exe_ips": [], "exe_urls": [], "exe_suspicious_imports": [], "exe_analysis_error": null, "signature_info": {}, "exe_company": null, "exe_product": null, "exe_description": null, "exe_version": null, "is_signed": false, "sig_subject": null, "sig_issuer": null, "defender_scanned": null, "defender_detected": null, "defender_threat_name": null, "defender_error": null, "risk_score": 0, "risk_reasons": []}, {"path": "C:\\Code\\ArtifactSleuth\\test_data\\tftpd64_portable_v4.74\\tftpd32.ini", "name": "tftpd32.ini", "relative_path": "tftpd64_portable_v4.74\\tftpd32.ini", "size": 1463, "size_human": "1.4 KB", "created_time": "2026-01-23T20:52:20.849000", "modified_time": "2026-01-14T09:14:27.602000", "accessed_time": "2026-01-26T16:49:17.729000", "is_directory": false, "is_archive": false, "is_password_protected": false, "archive_path": null, "mime_type": "text/plain", "file_type": "ASCII text, with CRLF line terminators", "friendly_type": ".INI File", "permissions": "-rw-rw-rw-", "owner": "NOTBADLEN\\maitn", "attributes": "A", "computer": "NotBadLEN", "parent_folder": "C:\\Code\\ArtifactSleuth\\test_data\\tftpd64_portable_v4.74", "extension_mismatch": false, "expected_extensions": null, "doc_author": null, "doc_last_modified_by": null, "doc_title": null, "doc_subject": null, "doc_keywords": null, "doc_created": null, "doc_modified": null, "doc_company": null, "doc_manager": null, "doc_category": null, "doc_comments": null, "md5": null, "sha1": null, "sha256": null, "vt_detected": null, "vt_detection_ratio": null, "vt_link": null, "vt_error": null, "doc_has_macros": null, "doc_has_javascript": null, "doc_suspicious_elements": [], "doc_analysis_error": null, "exe_domains": [], "exe_ips": [], "exe_urls": [], "exe_suspicious_imports": [], "exe_analysis_error": null, "signature_info": {}, "exe_company": null, "exe_product": null, "exe_description": null, "exe_version": null, "is_signed": false, "sig_subject": null, "sig_issuer": null, "defender_scanned": null, "defender_detected": null, "defender_threat_name": null, "defender_error": null, "risk_score": 0, "risk_reasons": []}, {"path": "archive.zip/test.txt", "name": "test.txt", "relative_path": "archive.zip/test.txt", "size": 23, "size_human": "23.0 B", "created_time": "2026-01-26T18:14:45.777000", "modified_time": "2026-01-26T18:14:45.777000", "accessed_time": "2026-01-26T18:14:45.777000", "is_directory": false, "is_archive": false, "is_password_protected": false, "archive_path": "archive.zip", "mime_type": "text/plain", "file_type": "ASCII text, with CRLF line terminators", "friendly_type": ".TXT File", "permissions": "-rw-rw-rw-", "owner": "NOTBADLEN\\maitn", "attributes": "A", "computer": "NotBadLEN", "parent_folder": "archive.zip", "extension_mismatch": false, "expected_extensions": null, "doc_author": null, "doc_last_modified_by": null, "doc_title": null, "doc_subject": null, "doc_keywords": null, "doc_created": null, "doc_modified": null, "doc_company": null, "doc_manager": null, "doc_category": null, "doc_comments": null, "md5": "475918671ac7a4ad2c1c8460a7f29197", "sha1": "d365bb2673496f08444cdb5de75f46e5eaa15c41", "sha256": "19ff0df18e4adfca33ee0a9573155346f36d3f7d36341ea6d1911dd4ca696624", "vt_detected": null, "vt_detection_ratio": null, "vt_link": null, "vt_error": null, "doc_has_macros": null, "doc_has_javascript": null, "doc_suspicious_elements": [], "doc_analysis_error": null, "exe_domains": [], "exe_ips": [], "exe_urls": [], "exe_suspicious_imports": [], "exe_analysis_error": null, "signature_info": {}, "exe_company": null, "exe_product": null, "exe_description": null, "exe_version": null, "is_signed": false, "sig_subject": null, "sig_issuer": null, "defender_scanned": null, "defender_detected": null, "defender_threat_name": null, "defender_error": null, "risk_score": 0, "risk_reasons": []}]</script>
     <script>
         // Theme toggle
         function toggleTheme() {
@@ -1198,7 +1175,7 @@ HTML_TEMPLATE = '''
             },
             'Windows Defender detection': {
                 desc: 'Windows Defender identified this file as a threat.',
-                risk: 'HIGH RISK - Microsoft\'s built-in antivirus flagged this file.',
+                risk: 'HIGH RISK - Microsoft's built-in antivirus flagged this file.',
                 detection: 'File was scanned locally using Windows Defender command-line scanner.'
             },
             'Contains VBA macros': {
@@ -1367,9 +1344,9 @@ HTML_TEMPLATE = '''
             // Hashes Section
             html += '<h4 style="margin:1.5rem 0 1rem 0;color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:0.5rem;">🔐 File Hashes</h4>';
             html += '<div class="details-grid">';
-            html += '<div class="detail-item"><div class="detail-label">MD5</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.md5||'-') + (f.md5 ? ' <button class="copy-btn" onclick="copyHash(\\''+f.md5+'\\',this)">📋</button>' : '') + '</div></div>';
-            html += '<div class="detail-item"><div class="detail-label">SHA1</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.sha1||'-') + (f.sha1 ? ' <button class="copy-btn" onclick="copyHash(\\''+f.sha1+'\\',this)">📋</button>' : '') + '</div></div>';
-            html += '<div class="detail-item"><div class="detail-label">SHA256</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;word-break:break-all;">' + (f.sha256||'-') + (f.sha256 ? ' <button class="copy-btn" onclick="copyHash(\\''+f.sha256+'\\',this)">📋</button>' : '') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">MD5</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.md5||'-') + (f.md5 ? ' <button class="copy-btn" onclick="copyHash(\''+f.md5+'\',this)">📋</button>' : '') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">SHA1</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.sha1||'-') + (f.sha1 ? ' <button class="copy-btn" onclick="copyHash(\''+f.sha1+'\',this)">📋</button>' : '') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">SHA256</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;word-break:break-all;">' + (f.sha256||'-') + (f.sha256 ? ' <button class="copy-btn" onclick="copyHash(\''+f.sha256+'\',this)">📋</button>' : '') + '</div></div>';
             html += '</div>';
             
             // VirusTotal Section (if available)
@@ -1580,154 +1557,3 @@ HTML_TEMPLATE = '''
     </script>
 </body>
 </html>
-'''
-
-
-def generate_html_report(
-    files: List[FileInfo],
-    summary: Dict[str, Any],
-    output_path: str,
-    scan_path: str,
-    split_threshold: int = 0,
-    part_number: int = 0,
-    total_parts: int = 1
-) -> None:
-    """
-    Generate an HTML report from scan results.
-    
-    Args:
-        files: List of FileInfo objects
-        summary: Scan summary dictionary
-        output_path: Path to save the HTML file
-        scan_path: Original path that was scanned
-        split_threshold: If > 0, indicates this is a split report
-        part_number: Current part number (0-indexed) for split reports
-        total_parts: Total number of parts in split report
-    """
-    # Custom Jinja2 filter for file sizes
-    def filesizeformat(value):
-        if value is None:
-            return '-'
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-            if abs(value) < 1024.0:
-                return f"{value:.1f} {unit}"
-            value /= 1024.0
-        return f"{value:.1f} PB"
-    
-    template = Template(HTML_TEMPLATE)
-    template.environment.filters['filesizeformat'] = filesizeformat
-    
-    # Convert FileInfo objects to dicts for template
-    file_dicts = [f.to_dict() for f in files]
-    
-    # Sort by risk score (highest first)
-    file_dicts.sort(key=lambda x: x.get('risk_score', 0), reverse=True)
-    
-    # Modify summary for split reports
-    if split_threshold > 0:
-        summary = summary.copy()
-        summary['is_split_report'] = True
-        summary['part_number'] = part_number + 1
-        summary['total_parts'] = total_parts
-        summary['files_in_part'] = len(file_dicts)
-    
-    html_content = template.render(
-        files=file_dicts,
-        files_json=json.dumps(file_dicts),
-        summary=summary,
-        scan_path=scan_path,
-        generated_time=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    )
-    
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(html_content)
-
-
-def generate_split_html_reports(
-    files: List[FileInfo],
-    summary: Dict[str, Any],
-    output_path: str,
-    scan_path: str,
-    files_per_report: int = 50000
-) -> List[str]:
-    """
-    Generate multiple HTML reports, splitting files across them.
-    
-    Args:
-        files: List of FileInfo objects
-        summary: Scan summary dictionary
-        output_path: Base output path (e.g., 'report.html')
-        scan_path: Original path that was scanned
-        files_per_report: Maximum files per report
-    
-    Returns:
-        List of generated report paths
-    """
-    if len(files) <= files_per_report:
-        generate_html_report(files, summary, output_path, scan_path)
-        return [output_path]
-    
-    # Calculate number of parts needed
-    total_parts = (len(files) + files_per_report - 1) // files_per_report
-    
-    # Generate base path for split reports
-    base_path = Path(output_path)
-    stem = base_path.stem
-    suffix = base_path.suffix or '.html'
-    parent = base_path.parent
-    
-    generated_paths = []
-    
-    for part in range(total_parts):
-        start_idx = part * files_per_report
-        end_idx = min(start_idx + files_per_report, len(files))
-        part_files = files[start_idx:end_idx]
-        
-        # Generate part filename: report_1.html, report_2.html, etc.
-        part_path = parent / f"{stem}_{part + 1}{suffix}"
-        
-        generate_html_report(
-            part_files, 
-            summary, 
-            str(part_path), 
-            scan_path,
-            split_threshold=files_per_report,
-            part_number=part,
-            total_parts=total_parts
-        )
-        generated_paths.append(str(part_path))
-    
-    return generated_paths
-
-
-def generate_report(
-    files: List[FileInfo],
-    summary: Dict[str, Any],
-    output_path: str,
-    scan_path: str,
-    format: str = 'html',
-    split_threshold: int = 0
-) -> List[str]:
-    """
-    Generate a report in the specified format.
-    
-    Args:
-        files: List of FileInfo objects
-        summary: Scan summary dictionary
-        output_path: Path to save the report
-        scan_path: Original path that was scanned
-        format: 'html' or 'csv'
-        split_threshold: If > 0, split HTML reports into parts with this many files each
-    
-    Returns:
-        List of generated report paths
-    """
-    if format.lower() == 'csv':
-        generate_csv_report(files, summary, output_path)
-        return [output_path]
-    else:
-        if split_threshold > 0:
-            return generate_split_html_reports(files, summary, output_path, scan_path, split_threshold)
-        else:
-            generate_html_report(files, summary, output_path, scan_path)
-            return [output_path]

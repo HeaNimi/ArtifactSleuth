@@ -110,6 +110,11 @@ def is_archive(file_path: str) -> bool:
     path = Path(file_path)
     suffix = path.suffix.lower()
     
+    # Exclude Office documents - they are ZIP internally but should be treated as documents
+    office_extensions = {'.docx', '.xlsx', '.pptx', '.odt', '.ods', '.odp', '.docm', '.xlsm', '.pptm'}
+    if suffix in office_extensions:
+        return False
+    
     # Check by extension first (fast path)
     # Check compound extensions like .tar.gz
     if len(path.suffixes) >= 2:
@@ -123,6 +128,9 @@ def is_archive(file_path: str) -> bool:
     # For files without archive extension, check magic bytes
     magic_type = detect_archive_by_magic(file_path)
     if magic_type:
+        # Double-check: if magic says ZIP but file is Office doc, don't treat as archive
+        if magic_type == 'zip' and suffix in office_extensions:
+            return False
         return True
     
     return False
