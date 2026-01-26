@@ -510,326 +510,60 @@ HTML_TEMPLATE = '''
         </div>
         {% endif %}
         
-        <!-- All Files -->
+        <!-- All Files (Optimized for 100k+ files) -->
         <div class="section">
             <div class="section-header" onclick="toggleSection(this)">
                 <h2>📁 All Files</h2>
                 <span class="badge">{{ files | length }}</span>
             </div>
             <div class="section-content">
-                <div class="filter-bar">
-                    <input type="text" id="fileFilter" placeholder="Filter by filename..." onkeyup="filterFiles()">
-                    <select id="riskFilter" onchange="filterFiles()">
+                <div class="filter-bar" style="gap: 0.75rem; flex-wrap: wrap;">
+                    <input type="text" id="searchInput" placeholder="Search path, mime, hash..." style="min-width: 250px;">
+                    <select id="riskFilter">
                         <option value="">All Risk Levels</option>
                         <option value="high">High Risk (50+)</option>
                         <option value="medium">Medium Risk (25-49)</option>
                         <option value="low">Low Risk (1-24)</option>
                         <option value="none">No Risk (0)</option>
                     </select>
+                    <select id="pageSize">
+                        <option value="100">100 / page</option>
+                        <option value="250" selected>250 / page</option>
+                        <option value="500">500 / page</option>
+                        <option value="1000">1000 / page</option>
+                    </select>
+                    <span id="resultStats" style="color: var(--text-secondary); font-size: 0.875rem;">Loading...</span>
                 </div>
                 <table id="filesTable">
                     <thead>
                         <tr>
-                            <th>Path</th>
+                            <th style="min-width: 300px;">Path</th>
                             <th>Size</th>
-                            <th>MIME Type</th>
+                            <th>MIME</th>
                             <th>Risk</th>
                             <th>SHA256</th>
-                            <th>Details</th>
+                            <th></th>
                         </tr>
                     </thead>
-                    <tbody>
-                        {% for file in files %}
-                        <tr class="file-row" data-risk="{{ file.risk_score }}" data-name="{{ file.relative_path | lower }}">
-                            <td>
-                                {{ file.relative_path }}
-                                {% if file.extension_mismatch %}
-                                <span class="tag mismatch" title="Expected: {{ file.expected_extensions }}">⚠️ Mismatch</span>
-                                {% endif %}
-                            </td>
-                            <td>{{ file.size | filesizeformat if file.size else '-' }}</td>
-                            <td>{{ file.mime_type or '-' }}</td>
-                            <td>
-                                {% if file.risk_score >= 50 %}
-                                <span class="risk-badge risk-high">{{ file.risk_score }}</span>
-                                {% elif file.risk_score >= 25 %}
-                                <span class="risk-badge risk-medium">{{ file.risk_score }}</span>
-                                {% elif file.risk_score > 0 %}
-                                <span class="risk-badge risk-low">{{ file.risk_score }}</span>
-                                {% else %}
-                                <span class="risk-badge risk-none">0</span>
-                                {% endif %}
-                            </td>
-                            <td class="hash-cell">
-                                {% if file.sha256 %}
-                                <span class="hash-text" id="hash-{{ loop.index }}">{{ file.sha256[:16] }}...</span>
-                                <button class="copy-btn" onclick="copyHash('{{ file.sha256 }}', this)" title="Copy full SHA256">📋</button>
-                                {% else %}
-                                -
-                                {% endif %}
-                            </td>
-                            <td>
-                                <button class="view-btn" onclick="toggleDetails('details-{{ loop.index }}')">View</button>
-                            </td>
-                        </tr>
-                        <tr id="details-{{ loop.index }}" style="display: none;">
-                            <td colspan="6">
-                                <div class="details-grid">
-                                    <div>
-                                        <div class="detail-item">
-                                            <div class="detail-label">Full Path</div>
-                                            <div class="detail-value">{{ file.path }}</div>
-                                        </div>
-                                        <div class="detail-item">
-                                            <div class="detail-label">MD5</div>
-                                            <div class="detail-value">
-                                                <span class="detail-value-text">{{ file.md5 or '-' }}</span>
-                                                {% if file.md5 %}
-                                                <button class="copy-btn" onclick="copyHash('{{ file.md5 }}', this)">📋</button>
-                                                {% endif %}
-                                            </div>
-                                        </div>
-                                        <div class="detail-item">
-                                            <div class="detail-label">SHA1</div>
-                                            <div class="detail-value">
-                                                <span class="detail-value-text">{{ file.sha1 or '-' }}</span>
-                                                {% if file.sha1 %}
-                                                <button class="copy-btn" onclick="copyHash('{{ file.sha1 }}', this)">📋</button>
-                                                {% endif %}
-                                            </div>
-                                        </div>
-                                        <div class="detail-item">
-                                            <div class="detail-label">SHA256</div>
-                                            <div class="detail-value">
-                                                <span class="detail-value-text">{{ file.sha256 or '-' }}</span>
-                                                {% if file.sha256 %}
-                                                <button class="copy-btn" onclick="copyHash('{{ file.sha256 }}', this)">📋</button>
-                                                {% endif %}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <div class="detail-item">
-                                            <div class="detail-label">Type</div>
-                                            <div class="detail-value">{{ file.friendly_type or (file.mime_type or 'File') }}</div>
-                                        </div>
-                                        <div class="detail-item">
-                                            <div class="detail-label">File location</div>
-                                            <div class="detail-value">{{ file.parent_folder or '-' }}</div>
-                                        </div>
-                                        <div class="detail-item">
-                                            <div class="detail-label">Size</div>
-                                            <div class="detail-value">{{ file.size | filesizeformat }} ({{ file.size }} bytes)</div>
-                                        </div>
-                                        <div class="detail-item">
-                                            <div class="detail-label">Date created</div>
-                                            <div class="detail-value">{{ file.created_time }}</div>
-                                        </div>
-                                        <div class="detail-item">
-                                            <div class="detail-label">Date modified</div>
-                                            <div class="detail-value">{{ file.modified_time }}</div>
-                                        </div>
-                                        <div class="detail-item">
-                                            <div class="detail-label">Attributes</div>
-                                            <div class="detail-value">{{ file.attributes or '-' }}</div>
-                                        </div>
-                                        <div class="detail-item">
-                                            <div class="detail-label">Owner</div>
-                                            <div class="detail-value">{{ file.owner or '-' }}</div>
-                                        </div>
-                                        <div class="detail-item">
-                                            <div class="detail-label">Computer</div>
-                                            <div class="detail-value">{{ file.computer or '-' }}</div>
-                                        </div>
-                                        {% if file.vt_link %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">VirusTotal</div>
-                                            <div class="detail-value">
-                                                <a href="{{ file.vt_link }}" target="_blank" class="vt-link">
-                                                    {{ file.vt_detection_ratio }} - View Report
-                                                </a>
-                                            </div>
-                                        </div>
-                                        {% endif %}
-                                    </div>
-                                </div>
-                                
-                                <!-- Document Properties -->
-                                {% if file.doc_author or file.doc_last_modified_by or file.doc_company or file.doc_title %}
-                                <div class="metadata-section">
-                                    <h4>📄 Document Properties</h4>
-                                    <div class="metadata-grid">
-                                        {% if file.doc_author %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Author</div>
-                                            <div class="detail-value">{{ file.doc_author }}</div>
-                                        </div>
-                                        {% endif %}
-                                        {% if file.doc_last_modified_by %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Last Modified By</div>
-                                            <div class="detail-value">{{ file.doc_last_modified_by }}</div>
-                                        </div>
-                                        {% endif %}
-                                        {% if file.doc_company %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Company</div>
-                                            <div class="detail-value">{{ file.doc_company }}</div>
-                                        </div>
-                                        {% endif %}
-                                        {% if file.doc_title %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Title</div>
-                                            <div class="detail-value">{{ file.doc_title }}</div>
-                                        </div>
-                                        {% endif %}
-                                        {% if file.doc_subject %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Subject</div>
-                                            <div class="detail-value">{{ file.doc_subject }}</div>
-                                        </div>
-                                        {% endif %}
-                                        {% if file.doc_keywords %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Keywords</div>
-                                            <div class="detail-value">{{ file.doc_keywords }}</div>
-                                        </div>
-                                        {% endif %}
-                                        {% if file.doc_manager %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Manager</div>
-                                            <div class="detail-value">{{ file.doc_manager }}</div>
-                                        </div>
-                                        {% endif %}
-                                        {% if file.doc_category %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Category</div>
-                                            <div class="detail-value">{{ file.doc_category }}</div>
-                                        </div>
-                                        {% endif %}
-                                        {% if file.doc_created %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Doc Created</div>
-                                            <div class="detail-value">{{ file.doc_created }}</div>
-                                        </div>
-                                        {% endif %}
-                                        {% if file.doc_modified %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Doc Modified</div>
-                                            <div class="detail-value">{{ file.doc_modified }}</div>
-                                        </div>
-                                        {% endif %}
-                                    </div>
-                                </div>
-                                {% endif %}
-                                
-                                {% if file.extension_mismatch %}
-                                <div class="ioc-section">
-                                    <strong>⚠️ Extension Mismatch:</strong>
-                                    <div class="ioc-list">
-                                        <span class="tag mismatch">MIME: {{ file.mime_type }}</span>
-                                        <span class="tag mismatch">Expected: {{ file.expected_extensions }}</span>
-                                    </div>
-                                </div>
-                                {% endif %}
-                                
-                                <!-- Executable Information -->
-                                {% if file.exe_company or file.exe_product or file.exe_version or file.exe_description or file.is_signed %}
-                                <div class="metadata-section">
-                                    <h4>⚙️ Executable Information</h4>
-                                    <div class="metadata-grid">
-                                        {% if file.exe_company %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Company</div>
-                                            <div class="detail-value">{{ file.exe_company }}</div>
-                                        </div>
-                                        {% endif %}
-                                        {% if file.exe_product %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Product</div>
-                                            <div class="detail-value">{{ file.exe_product }}</div>
-                                        </div>
-                                        {% endif %}
-                                        {% if file.exe_version %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Version</div>
-                                            <div class="detail-value">{{ file.exe_version }}</div>
-                                        </div>
-                                        {% endif %}
-                                        {% if file.exe_description %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Description</div>
-                                            <div class="detail-value">{{ file.exe_description }}</div>
-                                         </div>
-                                        {% endif %}
-                                        {% if file.is_signed %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Digital Signature</div>
-                                            <div class="detail-value">
-                                                <span class="tag info">✓ Signed</span>
-                                            </div>
-                                        </div>
-                                        {% endif %}
-                                        {% if file.sig_subject %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Signature Subject</div>
-                                            <div class="detail-value">{{ file.sig_subject }}</div>
-                                        </div>
-                                        {% endif %}
-                                        {% if file.sig_issuer %}
-                                        <div class="detail-item">
-                                            <div class="detail-label">Signature Issuer</div>
-                                            <div class="detail-value">{{ file.sig_issuer }}</div>
-                                        </div>
-                                        {% endif %}
-                                    </div>
-                                </div>
-                                {% endif %}
-                                
-                                {% if file.doc_suspicious_elements %}
-                                <div class="ioc-section">
-                                    <strong>Document Analysis:</strong>
-                                    <div class="ioc-list">
-                                        {% for elem in file.doc_suspicious_elements %}
-                                        <span class="tag suspicious">{{ elem }}</span>
-                                        {% endfor %}
-                                    </div>
-                                </div>
-                                {% endif %}
-                                
-                                {% if file.exe_domains or file.exe_ips or file.exe_suspicious_imports %}
-                                <div class="ioc-section">
-                                    <strong>Executable Analysis:</strong>
-                                    <div class="ioc-list">
-                                        {% for domain in file.exe_domains[:10] %}
-                                        <span class="tag network">{{ domain }}</span>
-                                        {% endfor %}
-                                        {% for ip in file.exe_ips[:10] %}
-                                        <span class="tag network">{{ ip }}</span>
-                                        {% endfor %}
-                                        {% for imp in file.exe_suspicious_imports[:5] %}
-                                        <span class="tag suspicious">{{ imp }}</span>
-                                        {% endfor %}
-                                    </div>
-                                </div>
-                                {% endif %}
-                                
-                                {% if file.risk_reasons %}
-                                <div class="ioc-section">
-                                    <strong>Risk Factors:</strong>
-                                    <div class="ioc-list">
-                                        {% for reason in file.risk_reasons %}
-                                        <span class="tag suspicious">{{ reason }}</span>
-                                        {% endfor %}
-                                    </div>
-                                </div>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
+                    <tbody id="filesBody"></tbody>
                 </table>
+                <div class="filter-bar" style="margin-top: 1rem; justify-content: space-between;">
+                    <span id="pageInfo" style="color: var(--text-secondary); font-size: 0.875rem;"></span>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="view-btn" onclick="prevPage()">◀ Prev</button>
+                        <button class="view-btn" onclick="nextPage()">Next ▶</button>
+                    </div>
+                </div>
             </div>
+        </div>
+        
+        <!-- Detail Panel (modal-style) -->
+        <div id="detailPanel" style="display:none; position:fixed; top:0; right:0; width:500px; height:100vh; background:var(--bg-card); border-left:1px solid var(--border); overflow-y:auto; z-index:1000; padding:1.5rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                <h3 style="margin:0;">File Details</h3>
+                <button class="view-btn" onclick="closeDetails()">✕ Close</button>
+            </div>
+            <div id="detailBody"></div>
         </div>
         
         <!-- Extension Mismatch Files -->
@@ -1006,72 +740,126 @@ HTML_TEMPLATE = '''
         </div>
     </div>
     
+    <script id="file-data" type="application/json">{{ files_json }}</script>
     <script>
+        // Theme toggle
         function toggleTheme() {
             const html = document.documentElement;
             const currentTheme = html.getAttribute('data-theme');
             html.setAttribute('data-theme', currentTheme === 'dark' ? 'light' : 'dark');
             localStorage.setItem('theme', html.getAttribute('data-theme'));
         }
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme) document.documentElement.setAttribute('data-theme', savedTheme);
         
         function toggleSection(header) {
             const content = header.nextElementSibling;
             content.classList.toggle('collapsed');
         }
         
-        function toggleDetails(id) {
-            const row = document.getElementById(id);
-            row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
-        }
-        
         function copyHash(hash, button) {
             navigator.clipboard.writeText(hash).then(() => {
-                const originalText = button.textContent;
                 button.textContent = '✓';
                 button.classList.add('copied');
-                setTimeout(() => {
-                    button.textContent = originalText;
-                    button.classList.remove('copied');
-                }, 2000);
-            }).catch(err => {
-                console.error('Failed to copy: ', err);
+                setTimeout(() => { button.textContent = '📋'; button.classList.remove('copied'); }, 1500);
             });
         }
         
-        function filterFiles() {
-            const nameFilter = document.getElementById('fileFilter').value.toLowerCase();
+        // Optimized data handling for 100k+ files
+        const filesData = JSON.parse(document.getElementById('file-data').textContent || '[]');
+        let filtered = filesData;
+        let page = 1;
+        let pageSize = 250;
+        let debounceTimer = null;
+        
+        function formatSize(bytes) {
+            if (!bytes || isNaN(bytes)) return '-';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            let val = bytes, idx = 0;
+            while (val >= 1024 && idx < units.length - 1) { val /= 1024; idx++; }
+            return val.toFixed(1) + ' ' + units[idx];
+        }
+        
+        function riskBadge(score) {
+            if (score >= 50) return '<span class="risk-badge risk-high">' + score + '</span>';
+            if (score >= 25) return '<span class="risk-badge risk-medium">' + score + '</span>';
+            if (score > 0) return '<span class="risk-badge risk-low">' + score + '</span>';
+            return '<span class="risk-badge risk-none">0</span>';
+        }
+        
+        function applyFilters() {
+            const q = document.getElementById('searchInput').value.toLowerCase();
             const riskFilter = document.getElementById('riskFilter').value;
-            const rows = document.querySelectorAll('.file-row');
-            
-            rows.forEach(row => {
-                const name = row.getAttribute('data-name');
-                const risk = parseInt(row.getAttribute('data-risk'));
-                
-                let showByName = name.includes(nameFilter);
-                let showByRisk = true;
-                
-                if (riskFilter === 'high') showByRisk = risk >= 50;
-                else if (riskFilter === 'medium') showByRisk = risk >= 25 && risk < 50;
-                else if (riskFilter === 'low') showByRisk = risk > 0 && risk < 25;
-                else if (riskFilter === 'none') showByRisk = risk === 0;
-                
-                row.style.display = (showByName && showByRisk) ? '' : 'none';
-                
-                // Also hide the details row
-                const detailsRow = row.nextElementSibling;
-                if (detailsRow && detailsRow.id && detailsRow.id.startsWith('details-')) {
-                    if (!(showByName && showByRisk)) {
-                        detailsRow.style.display = 'none';
-                    }
-                }
+            filtered = filesData.filter(f => {
+                const risk = f.risk_score || 0;
+                if (riskFilter === 'high' && risk < 50) return false;
+                if (riskFilter === 'medium' && (risk < 25 || risk >= 50)) return false;
+                if (riskFilter === 'low' && (risk <= 0 || risk >= 25)) return false;
+                if (riskFilter === 'none' && risk !== 0) return false;
+                if (!q) return true;
+                const haystack = [f.relative_path||'', f.mime_type||'', f.sha256||'', f.md5||''].join(' ').toLowerCase();
+                return haystack.includes(q);
             });
+            page = 1;
+            render();
         }
         
-        // Load saved theme
-        const savedTheme = localStorage.getItem('theme');
-        if (savedTheme) {
-            document.documentElement.setAttribute('data-theme', savedTheme);
+        function render() {
+            const tbody = document.getElementById('filesBody');
+            if (!tbody) return;
+            const start = (page - 1) * pageSize;
+            const end = Math.min(start + pageSize, filtered.length);
+            let html = '';
+            for (let i = start; i < end; i++) {
+                const f = filtered[i];
+                const mismatch = f.extension_mismatch ? '<span class="tag mismatch">⚠️</span>' : '';
+                const sha = f.sha256 ? (f.sha256.substring(0,16) + '...') : '-';
+                html += '<tr><td>' + (f.relative_path||f.name||'') + mismatch + '</td><td>' + formatSize(f.size) + '</td><td>' + (f.mime_type||'-') + '</td><td>' + riskBadge(f.risk_score||0) + '</td><td class="hash-cell">' + sha + '</td><td><button class="view-btn" onclick="showDetails(' + i + ')">View</button></td></tr>';
+            }
+            tbody.innerHTML = html;
+            document.getElementById('resultStats').textContent = filtered.length + ' matching • showing ' + (start+1) + '-' + end;
+            document.getElementById('pageInfo').textContent = 'Page ' + page + ' / ' + Math.max(1, Math.ceil(filtered.length / pageSize));
         }
+        
+        function prevPage() { if (page > 1) { page--; render(); } }
+        function nextPage() { if (page < Math.ceil(filtered.length / pageSize)) { page++; render(); } }
+        
+        function showDetails(idx) {
+            const f = filtered[idx];
+            if (!f) return;
+            const panel = document.getElementById('detailPanel');
+            const body = document.getElementById('detailBody');
+            body.innerHTML = '<div class="details-grid">' +
+                '<div class="detail-item"><div class="detail-label">Full Path</div><div class="detail-value">' + (f.path||f.relative_path||'') + '</div></div>' +
+                '<div class="detail-item"><div class="detail-label">Size</div><div class="detail-value">' + formatSize(f.size) + ' (' + (f.size||0) + ' bytes)</div></div>' +
+                '<div class="detail-item"><div class="detail-label">MIME</div><div class="detail-value">' + (f.mime_type||'-') + '</div></div>' +
+                '<div class="detail-item"><div class="detail-label">Type</div><div class="detail-value">' + (f.friendly_type||'-') + '</div></div>' +
+                '<div class="detail-item"><div class="detail-label">Created</div><div class="detail-value">' + (f.created_time||'-') + '</div></div>' +
+                '<div class="detail-item"><div class="detail-label">Modified</div><div class="detail-value">' + (f.modified_time||'-') + '</div></div>' +
+                '<div class="detail-item"><div class="detail-label">Owner</div><div class="detail-value">' + (f.owner||'-') + '</div></div>' +
+                '<div class="detail-item"><div class="detail-label">Computer</div><div class="detail-value">' + (f.computer||'-') + '</div></div>' +
+                '<div class="detail-item"><div class="detail-label">MD5</div><div class="detail-value">' + (f.md5||'-') + (f.md5 ? ' <button class="copy-btn" onclick="copyHash(\\''+f.md5+'\\',this)">📋</button>' : '') + '</div></div>' +
+                '<div class="detail-item"><div class="detail-label">SHA1</div><div class="detail-value">' + (f.sha1||'-') + (f.sha1 ? ' <button class="copy-btn" onclick="copyHash(\\''+f.sha1+'\\',this)">📋</button>' : '') + '</div></div>' +
+                '<div class="detail-item"><div class="detail-label">SHA256</div><div class="detail-value" style="word-break:break-all;">' + (f.sha256||'-') + (f.sha256 ? ' <button class="copy-btn" onclick="copyHash(\\''+f.sha256+'\\',this)">📋</button>' : '') + '</div></div>' +
+                '</div>';
+            panel.style.display = 'block';
+        }
+        function closeDetails() { document.getElementById('detailPanel').style.display = 'none'; }
+        
+        // Event listeners with debounce
+        document.getElementById('searchInput').addEventListener('input', function() {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(applyFilters, 200);
+        });
+        document.getElementById('riskFilter').addEventListener('change', applyFilters);
+        document.getElementById('pageSize').addEventListener('change', function() {
+            pageSize = parseInt(this.value, 10) || 250;
+            page = 1;
+            render();
+        });
+        
+        // Initial render
+        applyFilters();
     </script>
 </body>
 </html>
@@ -1082,7 +870,10 @@ def generate_html_report(
     files: List[FileInfo],
     summary: Dict[str, Any],
     output_path: str,
-    scan_path: str
+    scan_path: str,
+    split_threshold: int = 0,
+    part_number: int = 0,
+    total_parts: int = 1
 ) -> None:
     """
     Generate an HTML report from scan results.
@@ -1092,6 +883,9 @@ def generate_html_report(
         summary: Scan summary dictionary
         output_path: Path to save the HTML file
         scan_path: Original path that was scanned
+        split_threshold: If > 0, indicates this is a split report
+        part_number: Current part number (0-indexed) for split reports
+        total_parts: Total number of parts in split report
     """
     # Custom Jinja2 filter for file sizes
     def filesizeformat(value):
@@ -1112,8 +906,17 @@ def generate_html_report(
     # Sort by risk score (highest first)
     file_dicts.sort(key=lambda x: x.get('risk_score', 0), reverse=True)
     
+    # Modify summary for split reports
+    if split_threshold > 0:
+        summary = summary.copy()
+        summary['is_split_report'] = True
+        summary['part_number'] = part_number + 1
+        summary['total_parts'] = total_parts
+        summary['files_in_part'] = len(file_dicts)
+    
     html_content = template.render(
         files=file_dicts,
+        files_json=json.dumps(file_dicts),
         summary=summary,
         scan_path=scan_path,
         generated_time=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -1123,13 +926,71 @@ def generate_html_report(
         f.write(html_content)
 
 
+def generate_split_html_reports(
+    files: List[FileInfo],
+    summary: Dict[str, Any],
+    output_path: str,
+    scan_path: str,
+    files_per_report: int = 50000
+) -> List[str]:
+    """
+    Generate multiple HTML reports, splitting files across them.
+    
+    Args:
+        files: List of FileInfo objects
+        summary: Scan summary dictionary
+        output_path: Base output path (e.g., 'report.html')
+        scan_path: Original path that was scanned
+        files_per_report: Maximum files per report
+    
+    Returns:
+        List of generated report paths
+    """
+    if len(files) <= files_per_report:
+        generate_html_report(files, summary, output_path, scan_path)
+        return [output_path]
+    
+    # Calculate number of parts needed
+    total_parts = (len(files) + files_per_report - 1) // files_per_report
+    
+    # Generate base path for split reports
+    base_path = Path(output_path)
+    stem = base_path.stem
+    suffix = base_path.suffix or '.html'
+    parent = base_path.parent
+    
+    generated_paths = []
+    
+    for part in range(total_parts):
+        start_idx = part * files_per_report
+        end_idx = min(start_idx + files_per_report, len(files))
+        part_files = files[start_idx:end_idx]
+        
+        # Generate part filename: report_1.html, report_2.html, etc.
+        part_path = parent / f"{stem}_{part + 1}{suffix}"
+        
+        generate_html_report(
+            part_files, 
+            summary, 
+            str(part_path), 
+            scan_path,
+            split_threshold=files_per_report,
+            part_number=part,
+            total_parts=total_parts
+        )
+        generated_paths.append(str(part_path))
+    
+    return generated_paths
+
+
 def generate_report(
     files: List[FileInfo],
     summary: Dict[str, Any],
     output_path: str,
     scan_path: str,
-    format: str = 'html'
-) -> None:
+    format: str = 'html',
+    split_threshold: int = 0
+) -> List[str]:
     """
     Generate a report in the specified format.
     
@@ -1139,8 +1000,17 @@ def generate_report(
         output_path: Path to save the report
         scan_path: Original path that was scanned
         format: 'html' or 'csv'
+        split_threshold: If > 0, split HTML reports into parts with this many files each
+    
+    Returns:
+        List of generated report paths
     """
     if format.lower() == 'csv':
         generate_csv_report(files, summary, output_path)
+        return [output_path]
     else:
-        generate_html_report(files, summary, output_path, scan_path)
+        if split_threshold > 0:
+            return generate_split_html_reports(files, summary, output_path, scan_path, split_threshold)
+        else:
+            generate_html_report(files, summary, output_path, scan_path)
+            return [output_path]

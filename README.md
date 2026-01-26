@@ -1,5 +1,7 @@
 # ArtifactSleuth
 
+**WARNING! This whole tool is vibe coded, before use take time to read through the code because i don't give warranty if it breaks your systems.**
+
 ArtifactSleuth is a Python forensic scanner for removable media. It crawls folders and archives, extracts file intelligence, and produces investigator-friendly HTML or CSV reports with hashes, indicators, and optional VirusTotal enrichment.
 
 ## Highlights

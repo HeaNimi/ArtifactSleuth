@@ -1,6 +1,7 @@
 """
 Archive extraction module.
 Supports ZIP, 7z, RAR, TAR, GZ, BZ2, XZ formats.
+Optimized for large archives (20GB+).
 """
 
 import os
@@ -8,9 +9,12 @@ import zipfile
 import tarfile
 import tempfile
 import shutil
+import logging
 from pathlib import Path
 from typing import List, Tuple, Optional, Generator
 from contextlib import contextmanager
+
+logger = logging.getLogger(__name__)
 
 # Optional imports for additional formats
 try:
@@ -21,9 +25,28 @@ except ImportError:
 
 try:
     import rarfile
-    HAS_RAR = True
+    # Check if unrar tool is available
+    try:
+        rarfile.UNRAR_TOOL = rarfile.UNRAR_TOOL or 'unrar'
+        # Try to find unrar in common locations on Windows
+        if os.name == 'nt':
+            common_paths = [
+                r'C:\Program Files\WinRAR\UnRAR.exe',
+                r'C:\Program Files (x86)\WinRAR\UnRAR.exe',
+                os.path.join(os.path.dirname(__file__), '..', 'bin', 'UnRAR.exe'),
+            ]
+            for path in common_paths:
+                if os.path.exists(path):
+                    rarfile.UNRAR_TOOL = path
+                    break
+        HAS_RAR = True
+        HAS_RAR_TOOL = rarfile.tool_setup() is not None
+    except Exception:
+        HAS_RAR = True
+        HAS_RAR_TOOL = False
 except ImportError:
     HAS_RAR = False
+    HAS_RAR_TOOL = False
 
 
 class ArchiveError(Exception):
@@ -176,6 +199,13 @@ def extract_rar(archive_path: str, extract_to: str) -> Tuple[List[str], bool]:
     if not HAS_RAR:
         raise ArchiveError("rarfile not installed. Install with: pip install rarfile")
     
+    if not HAS_RAR_TOOL:
+        raise ArchiveError(
+            "RAR extraction requires UnRAR tool. "
+            "Install WinRAR or download UnRAR from https://www.rarlab.com/rar_add.htm "
+            "and add to PATH or C:\\Program Files\\WinRAR\\"
+        )
+    
     extracted_files = []
     
     try:
@@ -207,49 +237,82 @@ def extract_tar(archive_path: str, extract_to: str) -> Tuple[List[str], bool]:
     """
     Extract a TAR archive (including .tar.gz, .tar.bz2, .tar.xz, .tgz).
     TAR archives don't support password protection.
+    Handles large archives (20GB+) with streaming extraction.
     
     Returns:
         Tuple of (list of extracted file paths, is_password_protected)
     """
     extracted_files = []
     
-    # Determine compression mode
+    # Determine compression mode - try auto-detect first for reliability
     path = Path(archive_path)
     suffix = path.suffix.lower()
     
+    # Mode detection order: try specific mode first, fall back to auto-detect
+    modes_to_try = []
+    
     if suffix == '.tgz' or archive_path.endswith('.tar.gz'):
-        mode = 'r:gz'
+        modes_to_try = ['r:gz', 'r:*', 'r']
     elif archive_path.endswith('.tar.bz2'):
-        mode = 'r:bz2'
+        modes_to_try = ['r:bz2', 'r:*', 'r']
     elif archive_path.endswith('.tar.xz'):
-        mode = 'r:xz'
+        modes_to_try = ['r:xz', 'r:*', 'r']
     elif suffix == '.gz':
-        mode = 'r:gz'
+        modes_to_try = ['r:gz', 'r:*', 'r']
     elif suffix == '.bz2':
-        mode = 'r:bz2'
+        modes_to_try = ['r:bz2', 'r:*', 'r']
     elif suffix == '.xz':
-        mode = 'r:xz'
+        modes_to_try = ['r:xz', 'r:*', 'r']
+    elif suffix == '.tar':
+        modes_to_try = ['r', 'r:*']
     else:
-        mode = 'r'
+        modes_to_try = ['r:*', 'r']
+    
+    tf = None
+    last_error = None
+    
+    for mode in modes_to_try:
+        try:
+            tf = tarfile.open(archive_path, mode)
+            break
+        except (tarfile.TarError, OSError, EOFError) as e:
+            last_error = e
+            continue
+    
+    if tf is None:
+        raise ArchiveError(f"Error opening TAR archive (tried modes {modes_to_try}): {last_error}")
     
     try:
-        with tarfile.open(archive_path, mode) as tf:
-            # Security: filter out absolute paths and path traversal
-            for member in tf.getmembers():
-                if member.isdir():
-                    continue
-                # Security check
-                if member.name.startswith('/') or '..' in member.name:
-                    continue
-                
-                try:
-                    tf.extract(member, extract_to)
-                    extracted_files.append(os.path.join(extract_to, member.name))
-                except (tarfile.TarError, OSError):
-                    continue
-    
-    except tarfile.TarError as e:
-        raise ArchiveError(f"Error extracting TAR: {e}")
+        # For large archives, iterate without loading full member list
+        file_count = 0
+        max_files = 500000  # Safety limit for very large archives
+        
+        for member in tf:
+            if file_count >= max_files:
+                logger.warning(f"TAR archive has more than {max_files} files, stopping extraction")
+                break
+            
+            if member.isdir():
+                continue
+            
+            # Security check
+            if member.name.startswith('/') or '..' in member.name:
+                continue
+            
+            # Skip very large individual files (>4GB) to avoid memory issues
+            if member.size > 4 * 1024 * 1024 * 1024:
+                logger.warning(f"Skipping large file in TAR: {member.name} ({member.size} bytes)")
+                continue
+            
+            try:
+                tf.extract(member, extract_to, set_attrs=False)
+                extracted_files.append(os.path.join(extract_to, member.name))
+                file_count += 1
+            except (tarfile.TarError, OSError, IOError) as e:
+                logger.debug(f"Failed to extract {member.name}: {e}")
+                continue
+    finally:
+        tf.close()
     
     return extracted_files, False
 

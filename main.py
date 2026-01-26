@@ -100,6 +100,14 @@ Examples:
     )
     
     parser.add_argument(
+        '--split-report',
+        type=int,
+        default=0,
+        metavar='N',
+        help='Split HTML report into multiple files with N files each (e.g., --split-report 50000)'
+    )
+    
+    parser.add_argument(
         '--log',
         help='Path to log file (e.g., scan_errors.log)'
     )
@@ -253,8 +261,14 @@ Examples:
     
     # Phase 5: Generate report
     print(f"📝 Phase 5: Generating {args.format.upper()} report...")
-    generate_report(files, summary, str(output_path), str(scan_path), args.format)
-    print(f"   Report saved to: {output_path}")
+    report_paths = generate_report(files, summary, str(output_path), str(scan_path), args.format, args.split_report)
+    
+    if len(report_paths) == 1:
+        print(f"   Report saved to: {report_paths[0]}")
+    else:
+        print(f"   Generated {len(report_paths)} split reports:")
+        for rp in report_paths:
+            print(f"      - {rp}")
     print()
     
     # Summary
@@ -274,7 +288,9 @@ Examples:
         print(f"   ⚠️  Errors: {summary['errors']}")
     
     print("=" * 60)
-    print(f"📋 Open {output_path} to view the full report")
+    print(f"📋 Open {report_paths[0]} to view the full report")
+    if len(report_paths) > 1:
+        print(f"   ({len(report_paths)} parts total)")
     print()
 
 
