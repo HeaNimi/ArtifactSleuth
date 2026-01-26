@@ -155,7 +155,3 @@ Each report is self-contained with:
 - Browser becomes slow/unresponsive with large reports
 - Files exceed 500k+ (recommended: `--split-report 100000`)
 - Need to share portions of a large scan
-
-## License
-
-MIT License
