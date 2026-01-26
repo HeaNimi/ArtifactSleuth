@@ -679,8 +679,13 @@ def get_file_metadata(file_path: str, scan_root: str, archive_path: Optional[str
     file_type = None
     if HAS_MAGIC and path.is_file():
         try:
-            mime_type = magic.from_file(str(path), mime=True)
-            file_type = magic.from_file(str(path))
+            result = magic.from_file(str(path), mime=True)
+            # Only accept valid MIME types (format: type/subtype)
+            if result and '/' in result and not result.startswith('cannot open'):
+                mime_type = result
+            file_type_result = magic.from_file(str(path))
+            if file_type_result and not file_type_result.startswith('cannot open'):
+                file_type = file_type_result
         except Exception:
             pass
     

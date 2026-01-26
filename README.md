@@ -61,6 +61,11 @@ Enable file logging:
 python main.py /path/to/usb --log scan_errors.log --output report.html
 ```
 
+Exclude specific archive types from extraction:
+```bash
+python main.py /path/to/usb --exclude-archives .apk,.jar --output report.html
+```
+
 ## What Gets Reported
 
 - Extended metadata: owner, attributes (R/H/S/A), friendly type, computer name
@@ -82,6 +87,11 @@ python main.py /path/to/usb --log scan_errors.log --output report.html
 | `--vt-key` | VirusTotal API key | None |
 | `--vt-rate` | VirusTotal rate limit (lookups/min) | 4 |
 | `--no-vt` | Skip VirusTotal lookups | False |
+| `--no-hash` | Skip file hashing (faster scan) | False |
+| `--max-archive-depth` | Max nested archive extraction depth | 5 |
+| `--exclude-archives` | Comma-separated archive extensions to skip (e.g., `.apk,.jar,.aar`) | None |
+| `--split-report` | Split HTML report into N files each | 0 (disabled) |
+| `--quiet`, `-q` | Minimal output | False |
 
 ## License
 

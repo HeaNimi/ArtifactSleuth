@@ -108,6 +108,14 @@ Examples:
     )
     
     parser.add_argument(
+        '--exclude-archives',
+        type=str,
+        default='',
+        metavar='EXT',
+        help='Comma-separated list of archive extensions to skip extraction (e.g., --exclude-archives .apk,.jar,.aar)'
+    )
+    
+    parser.add_argument(
         '--log',
         help='Path to log file (e.g., scan_errors.log)'
     )
@@ -154,23 +162,41 @@ Examples:
     print("=" * 60)
     print()
     
+    # Parse excluded archive extensions
+    exclude_archive_types = set()
+    if args.exclude_archives:
+        for ext in args.exclude_archives.split(','):
+            ext = ext.strip().lower()
+            if not ext.startswith('.'):
+                ext = '.' + ext
+            exclude_archive_types.add(ext)
+        print(f"Excluding archives: {', '.join(sorted(exclude_archive_types))}")
+    
     # Phase 1: Scan files
     print("📁 Phase 1: Scanning files...")
     scanner = FileScanner(
         hash_files=not args.no_hash,
-        max_archive_depth=args.max_archive_depth
+        max_archive_depth=args.max_archive_depth,
+        exclude_archive_types=exclude_archive_types
     )
     
     if not args.quiet:
-        with tqdm(desc="Scanning", unit=" files", ncols=80) as pbar:
+        with tqdm(desc="Scanning", unit=" files", ncols=80, dynamic_ncols=True) as pbar:
+            last_count = [0]  # Use list to allow modification in closure
             def progress(msg):
+                # Update the postfix message
                 pbar.set_postfix_str(msg[:30] + "..." if len(msg) > 30 else msg)
-                pbar.update(1)
+                # Sync progress bar with actual file count
+                current_count = len(scanner.files)
+                if current_count > last_count[0]:
+                    pbar.update(current_count - last_count[0])
+                    last_count[0] = current_count
+                else:
+                    pbar.refresh()  # Force refresh even if count didn't change
             scanner.progress_callback = progress
             files = scanner.scan(str(scan_path))
-            # Set total and fill the bar if it's not already full
+            # Final sync
             if pbar.n < len(files):
-                pbar.total = len(files)
                 pbar.update(len(files) - pbar.n)
     else:
         files = scanner.scan(str(scan_path))
@@ -187,32 +213,34 @@ Examples:
     print()
     
     # Phase 2: Document analysis
-    doc_files = [f for f in files if is_document(f.path)]
+    # Only analyze files that weren't already analyzed during extraction (archive_path=None means on disk)
+    doc_files = [f for f in files if is_document(f.path) and f.archive_path is None]
     if doc_files:
         print(f"📄 Phase 2: Analyzing {len(doc_files)} documents...")
         if not args.quiet:
             with tqdm(total=len(doc_files), desc="Documents", unit=" files", ncols=80) as pbar:
                 def doc_progress(current, total, msg):
                     pbar.update(1)
-                analyze_files_documents(files, doc_progress)
+                analyze_files_documents(doc_files, doc_progress)
         else:
-            analyze_files_documents(files)
+            analyze_files_documents(doc_files)
         print(f"   Analyzed {len(doc_files)} documents")
         print()
     
     # Phase 3: Executable analysis
-    exe_files = [f for f in files if is_executable(f.path)]
+    # Only analyze files that weren't already analyzed during extraction
+    exe_files = [f for f in files if is_executable(f.path) and f.archive_path is None]
     if exe_files:
         print(f"⚙️  Phase 3: Analyzing {len(exe_files)} executables...")
         if not args.quiet:
             with tqdm(total=len(exe_files), desc="Executables", unit=" files", ncols=80) as pbar:
                 def exe_progress(current, total, msg):
                     pbar.update(1)
-                analyze_files_executables(files, exe_progress)
+                analyze_files_executables(exe_files, exe_progress)
         else:
-            analyze_files_executables(files)
+            analyze_files_executables(exe_files)
         
-        # Count IOCs found
+        # Count IOCs found (from all files including those analyzed during extraction)
         total_domains = sum(len(f.exe_domains) for f in files)
         total_ips = sum(len(f.exe_ips) for f in files)
         print(f"   Found {total_domains} domains, {total_ips} IPs")

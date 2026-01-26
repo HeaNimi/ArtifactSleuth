@@ -274,6 +274,19 @@ HTML_TEMPLATE = '''
             white-space: nowrap;
         }
         
+        .mime-cell {
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        td {
+            max-width: 400px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
         .hash-text {
             display: inline;
             text-overflow: ellipsis;
@@ -814,7 +827,8 @@ HTML_TEMPLATE = '''
                 const f = filtered[i];
                 const mismatch = f.extension_mismatch ? '<span class="tag mismatch">⚠️</span>' : '';
                 const sha = f.sha256 ? (f.sha256.substring(0,16) + '...') : '-';
-                html += '<tr><td>' + (f.relative_path||f.name||'') + mismatch + '</td><td>' + formatSize(f.size) + '</td><td>' + (f.mime_type||'-') + '</td><td>' + riskBadge(f.risk_score||0) + '</td><td class="hash-cell">' + sha + '</td><td><button class="view-btn" onclick="showDetails(' + i + ')">View</button></td></tr>';
+                const mime = f.mime_type ? (f.mime_type.length > 40 ? f.mime_type.substring(0,40)+'...' : f.mime_type) : '-';
+                html += '<tr><td>' + (f.relative_path||f.name||'') + mismatch + '</td><td>' + formatSize(f.size) + '</td><td class="mime-cell" title="'+(f.mime_type||'')+'">' + mime + '</td><td>' + riskBadge(f.risk_score||0) + '</td><td class="hash-cell">' + sha + '</td><td><button class="view-btn" onclick="showDetails(' + i + ')">View</button></td></tr>';
             }
             tbody.innerHTML = html;
             document.getElementById('resultStats').textContent = filtered.length + ' matching • showing ' + (start+1) + '-' + end;

@@ -24,6 +24,10 @@ from .archive_handler import (
     ArchiveError
 )
 
+# Import analyzers for inline analysis of extracted files
+from .executable_analyzer import is_executable, analyze_executable
+from .document_analyzer import is_document, analyze_document
+
 
 class FileScanner:
     """
@@ -37,7 +41,8 @@ class FileScanner:
         max_archive_depth: int = 5,
         progress_callback: Optional[Callable[[str], None]] = None,
         batch_small_files: bool = True,
-        small_file_batch_size: int = 500
+        small_file_batch_size: int = 500,
+        exclude_archive_types: set = None
     ):
         """
         Initialize the scanner.
@@ -48,12 +53,14 @@ class FileScanner:
             progress_callback: Optional callback for progress updates
             batch_small_files: Whether to batch hash small files for efficiency
             small_file_batch_size: Number of small files to batch before flushing
+            exclude_archive_types: Set of archive extensions to skip (e.g., {'.apk', '.jar'})
         """
         self.hash_files = hash_files
         self.max_archive_depth = max_archive_depth
         self.progress_callback = progress_callback
         self.batch_small_files = batch_small_files
         self.small_file_batch_size = small_file_batch_size
+        self.exclude_archive_types = exclude_archive_types or set()
         self.hash_cache = HashCache()
         self.files: List[FileInfo] = []
         self.password_protected_archives: List[str] = []
@@ -69,6 +76,66 @@ class FileScanner:
         """Update progress if callback is set."""
         if self.progress_callback:
             self.progress_callback(message)
+    
+    def _analyze_file_inline(self, file_info: FileInfo) -> None:
+        """
+        Analyze extracted files (PE/documents) inline while temp dir exists.
+        This must be called BEFORE the temp directory is cleaned up.
+        """
+        try:
+            # Analyze executables
+            if is_executable(file_info.path):
+                result = analyze_executable(file_info.path)
+                file_info.exe_domains = result['domains']
+                file_info.exe_ips = result['ips']
+                file_info.exe_urls = result['urls']
+                file_info.exe_suspicious_imports = result['suspicious_imports']
+                file_info.exe_analysis_error = result['error']
+                file_info.signature_info = result.get('signature_info', {})
+                if file_info.signature_info:
+                    file_info.is_signed = file_info.signature_info.get('is_signed')
+                    file_info.sig_subject = file_info.signature_info.get('signer_name') or file_info.signature_info.get('subject')
+                    file_info.sig_issuer = file_info.signature_info.get('issuer')
+            
+            # Analyze documents
+            elif is_document(file_info.path):
+                result = analyze_document(file_info.path)
+                file_info.doc_has_javascript = result.get('has_javascript', False)
+                file_info.doc_has_macros = result.get('has_macros', False)
+                file_info.doc_suspicious_elements = result.get('suspicious_elements', [])
+                file_info.doc_analysis_error = result.get('error')
+        except Exception as e:
+            self.logger.debug(f"Inline analysis error for {file_info.name}: {e}")
+    
+    def _should_exclude_archive(self, file_path: str) -> bool:
+        """
+        Check if an archive should be excluded from extraction.
+        
+        Args:
+            file_path: Path to the archive file
+        
+        Returns:
+            True if the archive should be skipped, False otherwise
+        """
+        if not self.exclude_archive_types:
+            return False
+        
+        path = Path(file_path)
+        suffix = path.suffix.lower()
+        
+        # Check single extension
+        if suffix in self.exclude_archive_types:
+            self.logger.info(f"Skipping excluded archive type: {path.name}")
+            return True
+        
+        # Check compound extensions like .tar.gz
+        if len(path.suffixes) >= 2:
+            compound = ''.join(path.suffixes[-2:]).lower()
+            if compound in self.exclude_archive_types:
+                self.logger.info(f"Skipping excluded archive type: {path.name}")
+                return True
+        
+        return False
     
     def scan(self, path: str) -> List[FileInfo]:
         """
@@ -189,8 +256,6 @@ class FileScanner:
             archive_path: Path of parent archive if file was extracted
             archive_depth: Current depth of archive nesting
         """
-        self._update_progress(f"Scanning: {Path(file_path).name}")
-        
         try:
             # Get file metadata
             file_info = get_file_metadata(file_path, scan_root, archive_path)
@@ -220,9 +285,14 @@ class FileScanner:
             with self._lock:
                 self.files.append(file_info)
             
+            # Update progress AFTER adding file so count is accurate
+            self._update_progress(f"Scanning: {Path(file_path).name}")
+            
             # Queue archives for later processing (shallow-first strategy)
+            # Skip if archive type is in exclude list
             if is_archive(file_path) and archive_depth < self.max_archive_depth:
-                self._archive_queue.put((file_path, scan_root, archive_depth))
+                if not self._should_exclude_archive(file_path):
+                    self._archive_queue.put((file_path, scan_root, archive_depth))
         
         except PermissionError:
             err_msg = f"Permission denied: {file_path}"
@@ -292,8 +362,6 @@ class FileScanner:
             archive_path: Path of parent archive if file was extracted
             archive_depth: Current depth of archive nesting
         """
-        self._update_progress(f"Scanning: {Path(file_path).name}")
-        
         try:
             # Get file metadata
             file_info = get_file_metadata(file_path, scan_root, archive_path)
@@ -305,15 +373,23 @@ class FileScanner:
                 file_info.sha1 = sha1
                 file_info.sha256 = sha256
             
+            # For files extracted from archives, analyze inline while temp dir exists
+            if archive_path and not file_info.is_directory:
+                self._analyze_file_inline(file_info)
+            
             with self._lock:
                 self.files.append(file_info)
             
-            # Handle archives
+            # Update progress AFTER adding file so count is accurate
+            self._update_progress(f"Scanning: {Path(file_path).name}")
+            
+            # Handle archives (skip if in exclude list)
             if is_archive(file_path) and archive_depth < self.max_archive_depth:
-                # We do NOT submit archives to the pool to avoid exhausting workers with blocking tasks
-                # Instead, process them directly or spawn a new task? 
-                # Processing directly in this thread (which is already a worker) is fine.
-                self._scan_archive(file_path, scan_root, archive_depth)
+                if not self._should_exclude_archive(file_path):
+                    # We do NOT submit archives to the pool to avoid exhausting workers with blocking tasks
+                    # Instead, process them directly or spawn a new task? 
+                    # Processing directly in this thread (which is already a worker) is fine.
+                    self._scan_archive(file_path, scan_root, archive_depth)
         
         except PermissionError:
             err_msg = f"Permission denied: {file_path}"
@@ -438,6 +514,7 @@ class FileScanner:
                 
                 # Scan extracted files
                 for extracted_file in files:
+                    self._update_progress(f"Extracting: {Path(extracted_file).name}")
                     file_info = get_file_metadata(extracted_file, temp_dir, rel_archive)
                     
                     if self.hash_files and not file_info.is_directory:
@@ -446,12 +523,17 @@ class FileScanner:
                         file_info.sha1 = sha1
                         file_info.sha256 = sha256
                     
+                    # Analyze executables/documents inline while temp dir exists
+                    if not file_info.is_directory:
+                        self._analyze_file_inline(file_info)
+                    
                     with self._lock:
                         self.files.append(file_info)
                     
-                    # Queue nested archives
+                    # Queue nested archives (skip if in exclude list)
                     if is_archive(extracted_file) and archive_depth + 1 < self.max_archive_depth:
-                        self._archive_queue.put((extracted_file, temp_dir, archive_depth + 1))
+                        if not self._should_exclude_archive(extracted_file):
+                            self._archive_queue.put((extracted_file, temp_dir, archive_depth + 1))
                 
                 # Process any nested archives found (recursively)
                 self._process_nested_archives(temp_dir, archive_depth + 1)
@@ -524,8 +606,8 @@ class FileScanner:
                     calculate_risk_score(file_info)
                     yield file_info
                     
-                    # Queue archives for later
-                    if is_archive(entry.path):
+                    # Queue archives for later (skip if in exclude list)
+                    if is_archive(entry.path) and not self._should_exclude_archive(entry.path):
                         self._archive_queue.put((entry.path, scan_root, 0))
                 
                 elif entry.is_dir(follow_symlinks=False):
@@ -570,9 +652,10 @@ class FileScanner:
                         calculate_risk_score(file_info)
                         yield file_info
                         
-                        # Queue nested archives
+                        # Queue nested archives (skip if in exclude list)
                         if is_archive(extracted_file) and archive_depth + 1 < self.max_archive_depth:
-                            self._archive_queue.put((extracted_file, temp_dir, archive_depth + 1))
+                            if not self._should_exclude_archive(extracted_file):
+                                self._archive_queue.put((extracted_file, temp_dir, archive_depth + 1))
             
             except (ArchiveError, Exception) as e:
                 self.errors.append(f"Error extracting {archive_path}: {e}")

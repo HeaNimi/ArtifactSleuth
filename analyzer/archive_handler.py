@@ -16,6 +16,52 @@ from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
+# Magic byte signatures for archive detection
+MAGIC_SIGNATURES = {
+    b'PK\x03\x04': 'zip',           # ZIP/APK/JAR
+    b'PK\x05\x06': 'zip',           # Empty ZIP
+    b'PK\x07\x08': 'zip',           # Spanned ZIP
+    b'Rar!\x1a\x07': 'rar',         # RAR
+    b"7z\xbc\xaf'\x1c": '7z',       # 7z
+    b'\x1f\x8b': 'gzip',            # GZIP
+    b'BZh': 'bzip2',                # BZIP2
+    b'\xfd7zXZ\x00': 'xz',          # XZ
+}
+
+def detect_archive_by_magic(file_path: str) -> Optional[str]:
+    """Detect archive type by reading magic bytes from file header."""
+    try:
+        with open(file_path, 'rb') as f:
+            header = f.read(16)
+        
+        if not header:
+            return None
+        
+        # Check known signatures
+        for sig, archive_type in MAGIC_SIGNATURES.items():
+            if header.startswith(sig):
+                return archive_type
+        
+        # TAR has magic at offset 257
+        try:
+            with open(file_path, 'rb') as f:
+                f.seek(257)
+                tar_magic = f.read(8)
+                if tar_magic.startswith(b'ustar'):
+                    return 'tar'
+        except (OSError, IOError):
+            pass
+        
+        # Check for uncompressed TAR (old format) - look for null bytes pattern
+        # First 100 bytes is filename, should be mostly printable or null
+        if len(header) >= 2 and header[0:2] != b'\x00\x00':
+            # Could be old-style TAR, but we can't be sure
+            pass
+        
+        return None
+    except (OSError, IOError):
+        return None
+
 # Optional imports for additional formats
 try:
     import py7zr
@@ -60,17 +106,26 @@ class PasswordProtectedError(ArchiveError):
 
 
 def is_archive(file_path: str) -> bool:
-    """Check if a file is a supported archive format."""
+    """Check if a file is a supported archive format using extension and magic bytes."""
     path = Path(file_path)
     suffix = path.suffix.lower()
     
+    # Check by extension first (fast path)
     # Check compound extensions like .tar.gz
     if len(path.suffixes) >= 2:
         compound = ''.join(path.suffixes[-2:]).lower()
         if compound in {'.tar.gz', '.tar.bz2', '.tar.xz'}:
             return True
     
-    return suffix in {'.zip', '.7z', '.rar', '.tar', '.gz', '.bz2', '.xz', '.tgz', '.apk', '.jar'}
+    if suffix in {'.zip', '.7z', '.rar', '.tar', '.gz', '.bz2', '.xz', '.tgz', '.apk', '.jar'}:
+        return True
+    
+    # For files without archive extension, check magic bytes
+    magic_type = detect_archive_by_magic(file_path)
+    if magic_type:
+        return True
+    
+    return False
 
 
 def get_archive_type(file_path: str) -> Optional[str]:
@@ -82,9 +137,26 @@ def get_archive_type(file_path: str) -> Optional[str]:
     if len(path.suffixes) >= 2:
         compound = ''.join(path.suffixes[-2:]).lower()
         if compound in {'.tar.gz', '.tar.bz2', '.tar.xz'}:
+            # Verify with magic bytes - these should start with gzip/bz2/xz magic
+            magic_type = detect_archive_by_magic(file_path)
+            if magic_type in {'gzip', 'bzip2', 'xz'}:
+                return 'tar'  # Compressed tar
+            elif magic_type == 'tar':
+                return 'tar'  # Already uncompressed
+            elif magic_type:
+                # File is actually a different type (e.g., ZIP mislabeled as .tar.gz)
+                logger.warning(f"File {path.name} has extension {compound} but is actually {magic_type}")
+                return magic_type
+            # Fall through to extension-based if magic detection fails
             return 'tar'
     
     if suffix == '.tgz':
+        magic_type = detect_archive_by_magic(file_path)
+        if magic_type == 'gzip':
+            return 'tar'
+        elif magic_type and magic_type != 'tar':
+            logger.warning(f"File {path.name} has extension .tgz but is actually {magic_type}")
+            return magic_type
         return 'tar'
     
     type_map = {
@@ -99,7 +171,20 @@ def get_archive_type(file_path: str) -> Optional[str]:
         '.xz': 'xz',
     }
     
-    return type_map.get(suffix)
+    extension_type = type_map.get(suffix)
+    
+    # Verify with magic bytes for common mislabeled files
+    if extension_type:
+        magic_type = detect_archive_by_magic(file_path)
+        if magic_type and magic_type != extension_type:
+            # Special case: .gz file might contain tar (tar.gz with single extension)
+            if extension_type == 'gzip' and magic_type == 'gzip':
+                return 'gzip'
+            # File type doesn't match extension
+            logger.warning(f"File {path.name} has extension {suffix} but is actually {magic_type}")
+            return magic_type
+    
+    return extension_type
 
 
 @contextmanager
@@ -244,14 +329,31 @@ def extract_tar(archive_path: str, extract_to: str) -> Tuple[List[str], bool]:
     """
     extracted_files = []
     
-    # Determine compression mode - try auto-detect first for reliability
+    # First, verify the file is actually a TAR/compressed archive using magic bytes
+    magic_type = detect_archive_by_magic(archive_path)
     path = Path(archive_path)
     suffix = path.suffix.lower()
+    
+    # Check if file is actually a different archive type
+    if magic_type and magic_type not in {'tar', 'gzip', 'bzip2', 'xz'}:
+        raise ArchiveError(
+            f"File {path.name} has TAR-like extension but is actually a {magic_type.upper()} file. "
+            f"Magic bytes indicate: {magic_type}"
+        )
     
     # Mode detection order: try specific mode first, fall back to auto-detect
     modes_to_try = []
     
-    if suffix == '.tgz' or archive_path.endswith('.tar.gz'):
+    # Use magic type to determine mode if available
+    if magic_type == 'gzip':
+        modes_to_try = ['r:gz', 'r:*']
+    elif magic_type == 'bzip2':
+        modes_to_try = ['r:bz2', 'r:*']
+    elif magic_type == 'xz':
+        modes_to_try = ['r:xz', 'r:*']
+    elif magic_type == 'tar':
+        modes_to_try = ['r', 'r:*']
+    elif suffix == '.tgz' or archive_path.endswith('.tar.gz'):
         modes_to_try = ['r:gz', 'r:*', 'r']
     elif archive_path.endswith('.tar.bz2'):
         modes_to_try = ['r:bz2', 'r:*', 'r']
@@ -280,7 +382,17 @@ def extract_tar(archive_path: str, extract_to: str) -> Tuple[List[str], bool]:
             continue
     
     if tf is None:
-        raise ArchiveError(f"Error opening TAR archive (tried modes {modes_to_try}): {last_error}")
+        # Provide helpful error message
+        if magic_type is None:
+            raise ArchiveError(
+                f"Cannot open {path.name}: File does not appear to be a valid archive. "
+                f"No recognized archive magic bytes found. "
+                f"The file may be corrupted, empty, or not an archive at all."
+            )
+        else:
+            raise ArchiveError(
+                f"Error opening TAR archive {path.name} (detected type: {magic_type}): {last_error}"
+            )
     
     try:
         # For large archives, iterate without loading full member list
@@ -317,6 +429,35 @@ def extract_tar(archive_path: str, extract_to: str) -> Tuple[List[str], bool]:
     return extracted_files, False
 
 
+def extract_gzip(archive_path: str, extract_to: str) -> Tuple[List[str], bool]:
+    """
+    Extract a standalone GZIP file (not tar.gz).
+    Simply decompresses the .gz file to extract_to directory.
+    
+    Returns:
+        Tuple of (list of extracted file paths, is_password_protected)
+    """
+    import gzip
+    
+    path = Path(archive_path)
+    # Output filename: remove .gz extension
+    output_name = path.stem if path.suffix.lower() == '.gz' else path.name + '.decompressed'
+    output_path = os.path.join(extract_to, output_name)
+    
+    try:
+        with gzip.open(archive_path, 'rb') as gz_in:
+            with open(output_path, 'wb') as f_out:
+                # Stream in chunks for large files
+                while True:
+                    chunk = gz_in.read(64 * 1024)
+                    if not chunk:
+                        break
+                    f_out.write(chunk)
+        return [output_path], False
+    except Exception as e:
+        raise ArchiveError(f"Error extracting GZIP file: {e}")
+
+
 def extract_archive(archive_path: str, extract_to: str) -> Tuple[List[str], bool]:
     """
     Extract an archive to a directory.
@@ -332,6 +473,14 @@ def extract_archive(archive_path: str, extract_to: str) -> Tuple[List[str], bool
         ArchiveError: If extraction fails
     """
     archive_type = get_archive_type(archive_path)
+    magic_type = detect_archive_by_magic(archive_path)
+    
+    # Use magic type to correct misidentified files
+    if magic_type and magic_type != archive_type:
+        logger.info(f"File {Path(archive_path).name}: extension suggests {archive_type}, magic bytes indicate {magic_type}")
+        # Trust magic bytes over extension for actual extraction
+        if magic_type in {'zip', '7z', 'rar'}:
+            archive_type = magic_type
     
     if archive_type == 'zip':
         return extract_zip(archive_path, extract_to)
@@ -339,9 +488,36 @@ def extract_archive(archive_path: str, extract_to: str) -> Tuple[List[str], bool
         return extract_7z(archive_path, extract_to)
     elif archive_type == 'rar':
         return extract_rar(archive_path, extract_to)
-    elif archive_type in {'tar', 'gzip', 'bzip2', 'xz'}:
+    elif archive_type == 'tar':
         return extract_tar(archive_path, extract_to)
+    elif archive_type == 'gzip':
+        # Check if this is a tar.gz or standalone gzip
+        # Try tar extraction first, fall back to simple gzip decompress
+        try:
+            return extract_tar(archive_path, extract_to)
+        except ArchiveError:
+            # Not a tar.gz, try as standalone gzip
+            logger.debug(f"File {Path(archive_path).name} is not tar.gz, trying standalone gzip")
+            return extract_gzip(archive_path, extract_to)
+    elif archive_type in {'bzip2', 'xz'}:
+        # Similar handling for bz2/xz - could be tar.bz2 or standalone
+        try:
+            return extract_tar(archive_path, extract_to)
+        except ArchiveError:
+            # For now, we don't have standalone bz2/xz handlers
+            raise ArchiveError(f"File appears to be standalone {archive_type}, not a tar archive")
     else:
+        # Last resort: check magic bytes for unknown extensions
+        if magic_type:
+            logger.warning(f"Unknown extension for {archive_path}, but detected as {magic_type}")
+            if magic_type == 'zip':
+                return extract_zip(archive_path, extract_to)
+            elif magic_type == '7z':
+                return extract_7z(archive_path, extract_to)
+            elif magic_type == 'rar':
+                return extract_rar(archive_path, extract_to)
+            elif magic_type in {'tar', 'gzip', 'bzip2', 'xz'}:
+                return extract_tar(archive_path, extract_to)
         raise ArchiveError(f"Unsupported archive format: {archive_path}")
 
 
