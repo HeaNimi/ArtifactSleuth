@@ -115,20 +115,20 @@ HTML_TEMPLATE = '''
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 2rem;
-            padding-bottom: 1rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
             border-bottom: 1px solid var(--border);
         }
         
         h1 {
-            font-size: 1.875rem;
+            font-size: 1.25rem;
             font-weight: 700;
             color: var(--text-primary);
         }
         
         .header-meta {
             color: var(--text-secondary);
-            font-size: 0.875rem;
+            font-size: 0.75rem;
         }
         
         .theme-toggle, .copy-btn, .view-btn {
@@ -160,28 +160,28 @@ HTML_TEMPLATE = '''
         
         .summary-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-            margin-bottom: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 0.5rem;
+            margin-bottom: 1rem;
         }
         
         .summary-card {
             background: var(--bg-card);
             border: 1px solid var(--border);
-            border-radius: 0.75rem;
-            padding: 1.25rem;
+            border-radius: 0.5rem;
+            padding: 0.6rem 0.8rem;
         }
         
         .summary-card h3 {
-            font-size: 0.75rem;
+            font-size: 0.65rem;
             text-transform: uppercase;
             letter-spacing: 0.05em;
             color: var(--text-secondary);
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.25rem;
         }
         
         .summary-card .value {
-            font-size: 1.5rem;
+            font-size: 1.1rem;
             font-weight: 700;
         }
         
@@ -350,7 +350,7 @@ HTML_TEMPLATE = '''
             bottom: 100%;
             left: 50%;
             transform: translateX(-50%);
-            background: var(--bg);
+            background: var(--bg-card);
             border: 1px solid var(--border);
             border-radius: 6px;
             padding: 0.75rem;
@@ -361,7 +361,7 @@ HTML_TEMPLATE = '''
             font-size: 0.85rem;
             line-height: 1.4;
             text-align: left;
-            color: var(--text);
+            color: var(--text-primary);
             font-weight: normal;
         }
         .tooltip-content::after {
@@ -612,9 +612,12 @@ HTML_TEMPLATE = '''
                     Generated: {{ generated_time }} | Scanned: {{ scan_path }}
                 </div>
             </div>
-            <button class="theme-toggle" onclick="toggleTheme()">
-                🌓 Toggle Theme
-            </button>
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <div style="background: var(--danger); color: white; padding: 0.4rem 0.8rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">🔒 Classified - For Internal Use</div>
+                <button class="theme-toggle" onclick="toggleTheme()">
+                    🌓 Toggle Theme
+                </button>
+            </div>
         </header>
         
         <!-- Summary Cards -->
@@ -671,12 +674,6 @@ HTML_TEMPLATE = '''
                         <option value="medium">Medium Risk (25-49)</option>
                         <option value="low">Low Risk (1-24)</option>
                         <option value="none">No Risk (0)</option>
-                    </select>
-                    <select id="pageSize">
-                        <option value="100">100 / page</option>
-                        <option value="250" selected>250 / page</option>
-                        <option value="500">500 / page</option>
-                        <option value="1000">1000 / page</option>
                     </select>
                     <span id="resultStats" style="color: var(--text-secondary); font-size: 0.875rem;">Loading...</span>
                 </div>
@@ -902,8 +899,6 @@ HTML_TEMPLATE = '''
         updateLoading('Parsing file data...', 10, '');
         let filesData = [];
         let filtered = [];
-        let page = 1;
-        let pageSize = 250;
         let debounceTimer = null;
         
         // Virtual scroll state
