@@ -11,8 +11,8 @@ This document describes how to implement Elastic Common Schema (ECS) v9.2.0 norm
 
 **Implementation approach:**
 - Add a new `to_ecs_dict()` method to FileInfo that transforms internal fields to ECS format
-- Keep the existing internal model unchanged for backward compatibility
-- Support both legacy and ECS output via `--ecs-mode` CLI flag
+- Keep the existing internal model unchanged (add transformation layer on top)
+- All output formats (JSON/CSV/HTML) will use ECS format by default
 - Use nested JSON for ECS output, flattened dot-notation for CSV
 
 ---
@@ -493,7 +493,7 @@ import json
 from typing import List, Dict, Any
 from analyzer.metadata import FileInfo
 
-def generate_ecs_json_report(
+def generate_json_report(
     files: List[FileInfo],
     summary: Dict[str, Any],
     output_path: str,
@@ -524,10 +524,10 @@ def generate_ecs_json_report(
 
 #### CSV Export
 
-Modify `generate_csv_report()` to support ECS mode in `analyzer/report_generator.py`:
+Update `generate_csv_report()` in `analyzer/report_generator.py` to output ECS format:
 
 ```python
-def generate_ecs_csv_report(
+def generate_csv_report(
     files: List[FileInfo],
     summary: Dict[str, Any],
     output_path: str
@@ -587,102 +587,74 @@ def generate_ecs_csv_report(
 
 #### HTML Report
 
-Modify `generate_html_report()` to embed both legacy and ECS JSON in `analyzer/report_generator.py`:
+Modify `generate_html_report()` to embed ECS JSON in `analyzer/report_generator.py`:
 
 ```python
 def generate_html_report(
     files: List[FileInfo],
     summary: Dict[str, Any],
     output_path: str,
-    scan_path: str,
-    ecs_mode: bool = False
+    scan_path: str
 ) -> None:
     """
-    Generate HTML report with optional ECS mode.
-    
-    Args:
-        ecs_mode: If True, embed ECS JSON. If False, embed legacy JSON.
+    Generate HTML report with ECS-normalized data.
     """
     # Existing HTML generation code...
     
-    # Choose which JSON to embed
-    if ecs_mode:
-        # ECS mode - transform to ECS format
-        files_data = [f.to_ecs_dict() for f in files]
-    else:
-        # Legacy mode - use existing to_dict()
-        files_data = [f.to_dict() for f in files]
-    
+    # Transform to ECS format for embedding
+    files_data = [f.to_ecs_dict() for f in files]
     files_json = json.dumps(files_data, separators=(',', ':'), default=str)
     
     # Embed in HTML template...
 ```
 
 **Explanation:**
-- Adds ecs_mode parameter to control output format
-- When enabled, embeds ECS-normalized JSON for client-side rendering
-- Falls back to legacy format for backward compatibility
+- Always embeds ECS-normalized JSON for client-side rendering
+- JavaScript in HTML will work with ECS field structure
 
-### Step 4: Add CLI Flag
+### Step 4: Update Report Generation in main.py
 
-Modify `main.py` to add the `--ecs-mode` flag:
+Modify `main.py` to use ECS generators:
 
 ```python
 def main():
     parser = argparse.ArgumentParser(...)
     
-    # Add ECS mode flag
-    parser.add_argument(
-        '--ecs-mode',
-        action='store_true',
-        help='Generate ECS v9.2.0 normalized output (JSON/CSV/HTML)'
-    )
+    # ... existing arguments (no --ecs-mode flag needed) ...
     
     args = parser.parse_args()
     
     # ... existing scan logic ...
     
-    # Generate report with ECS mode if requested
+    # Generate report with ECS format
     if args.format == 'json':
-        if args.ecs_mode:
-            generate_ecs_json_report(files, summary, output_path, scan_path)
-        else:
-            # Legacy JSON export (if it exists)
-            pass
+        generate_json_report(files, summary, output_path, scan_path)
     elif args.format == 'csv':
-        if args.ecs_mode:
-            generate_ecs_csv_report(files, summary, output_path)
-        else:
-            generate_csv_report(files, summary, output_path)  # Legacy
+        generate_csv_report(files, summary, output_path)
     elif args.format == 'html':
-        generate_html_report(files, summary, output_path, scan_path, ecs_mode=args.ecs_mode)
+        generate_html_report(files, summary, output_path, scan_path)
 ```
 
 **Explanation:**
-- Adds --ecs-mode boolean flag to CLI
-- Routes to ECS or legacy generators based on flag
-- Default is legacy mode for backward compatibility
+- Always uses ECS format for all output types
+- No flag needed - ECS is the only mode
+- Simplified logic without conditional branching
 
 ---
 
 ## Usage Examples
 
-### ECS JSON Output
+### JSON Output
 ```bash
-python main.py /path/to/usb --ecs-mode --format json --output report.json
+python main.py /path/to/usb --format json --output report.json
 ```
 
-### ECS CSV Output
+### CSV Output
 ```bash
-python main.py /path/to/usb --ecs-mode --format csv --output report.csv
+python main.py /path/to/usb --format csv --output report.csv
 ```
 
-### ECS HTML Output
-```bash
-python main.py /path/to/usb --ecs-mode --output report.html
-```
-
-### Legacy Output (default)
+### HTML Output (default)
 ```bash
 python main.py /path/to/usb --output report.html
 ```
