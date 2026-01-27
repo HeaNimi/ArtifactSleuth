@@ -1515,9 +1515,9 @@ HTML_TEMPLATE = '''
             // Hashes Section
             html += '<h4 style="margin:1.5rem 0 1rem 0;color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:0.5rem;">🔐 File Hashes</h4>';
             html += '<div class="details-grid">';
-            html += '<div class="detail-item"><div class="detail-label">MD5</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.md5||'-') + (f.md5 ? ' <button class="copy-btn" onclick="copyHash(\x27'+f.md5+'\x27,this)">📋</button>' : '') + '</div></div>';
-            html += '<div class="detail-item"><div class="detail-label">SHA1</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.sha1||'-') + (f.sha1 ? ' <button class="copy-btn" onclick="copyHash(\x27'+f.sha1+'\x27,this)">📋</button>' : '') + '</div></div>';
-            html += '<div class="detail-item"><div class="detail-label">SHA256</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;word-break:break-all;">' + (f.sha256||'-') + (f.sha256 ? ' <button class="copy-btn" onclick="copyHash(\x27'+f.sha256+'\x27,this)">📋</button>' : '') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">MD5</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.md5||'-') + (f.md5 ? ' <button class="copy-btn" onclick="copyHash(\\x27'+f.md5+'\\x27,this)">📋</button>' : '') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">SHA1</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.sha1||'-') + (f.sha1 ? ' <button class="copy-btn" onclick="copyHash(\\x27'+f.sha1+'\\x27,this)">📋</button>' : '') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">SHA256</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;word-break:break-all;">' + (f.sha256||'-') + (f.sha256 ? ' <button class="copy-btn" onclick="copyHash(\\x27'+f.sha256+'\\x27,this)">📋</button>' : '') + '</div></div>';
             html += '</div>';
             
             // VirusTotal Section (if available)
@@ -1645,22 +1645,26 @@ HTML_TEMPLATE = '''
         // ==========================================
         // IOC Table with Pagination
         // ==========================================
-        const iocData = [];
-        // Build IOC data from files
-        filesData.forEach(function(f) {
-            if (f.exe_domains && f.exe_domains.length) {
-                f.exe_domains.forEach(function(d) {
-                    iocData.push({type: 'domain', value: d, source: f.relative_path || f.name});
-                });
-            }
-            if (f.exe_ips && f.exe_ips.length) {
-                f.exe_ips.forEach(function(ip) {
-                    iocData.push({type: 'ip', value: ip, source: f.relative_path || f.name});
-                });
-            }
-        });
+        let iocData = [];
+        let iocFiltered = [];
         
-        let iocFiltered = iocData.slice();
+        // Build IOC data from files (called after filesData is loaded)
+        function buildIOCData() {
+            iocData = [];
+            filesData.forEach(function(f) {
+                if (f.exe_domains && f.exe_domains.length) {
+                    f.exe_domains.forEach(function(d) {
+                        iocData.push({type: 'domain', value: d, source: f.relative_path || f.name});
+                    });
+                }
+                if (f.exe_ips && f.exe_ips.length) {
+                    f.exe_ips.forEach(function(ip) {
+                        iocData.push({type: 'ip', value: ip, source: f.relative_path || f.name});
+                    });
+                }
+            });
+            iocFiltered = iocData.slice();
+        }
         let iocPage = 1;
         const iocPageSize = 50;
         
@@ -1744,6 +1748,8 @@ HTML_TEMPLATE = '''
                             
                             setTimeout(() => {
                                 updateVirtualScroll();
+                                buildIOCData();
+                                renderIOCs();
                                 updateLoading('Complete!', 100, total.toLocaleString() + ' files loaded');
                                 
                                 setTimeout(hideLoading, 300);
