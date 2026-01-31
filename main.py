@@ -64,9 +64,9 @@ Examples:
     
     parser.add_argument(
         '-f', '--format',
-        choices=['html', 'csv'],
+        choices=['html', 'csv', 'ecs', 'jsonl'],
         default='html',
-        help='Output format (default: html)'
+        help='Output format: html, csv, ecs (ECS JSON), or jsonl (ECS JSON Lines) (default: html)'
     )
     
     parser.add_argument(
@@ -168,13 +168,19 @@ Examples:
     # Determine output path
     output_path = Path(args.output)
     if not output_path.suffix:
-        output_path = output_path.with_suffix('.html' if args.format == 'html' else '.csv')
+        # Auto-detect extension based on format
+        ext_map = {'html': '.html', 'csv': '.csv', 'ecs': '.json', 'jsonl': '.jsonl'}
+        output_path = output_path.with_suffix(ext_map.get(args.format, '.html'))
     
     # Auto-detect format from output extension if not explicitly set
     if output_path.suffix.lower() == '.csv' and args.format == 'html':
         args.format = 'csv'
-    elif output_path.suffix.lower() == '.html' and args.format == 'csv':
+    elif output_path.suffix.lower() == '.html' and args.format in ['csv', 'ecs', 'jsonl']:
         args.format = 'html'
+    elif output_path.suffix.lower() in ['.json'] and args.format == 'html':
+        args.format = 'ecs'
+    elif output_path.suffix.lower() == '.jsonl' and args.format == 'html':
+        args.format = 'jsonl'
     
     print("=" * 60)
     print("🔍 USB Forensic File Analyzer")
