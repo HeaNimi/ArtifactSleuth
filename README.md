@@ -51,6 +51,16 @@ CSV output:
 python main.py /path/to/usb --format csv --output report.csv
 ```
 
+ECS (Elastic Common Schema) JSON output for SIEM integration:
+```bash
+python main.py /path/to/usb --format ecs --output report.json
+```
+
+ECS JSON Lines output for bulk ingestion to Elasticsearch:
+```bash
+python main.py /path/to/usb --format jsonl --output report.jsonl
+```
+
 Skip VirusTotal lookups:
 ```bash
 python main.py /path/to/usb --no-vt --output report.html
@@ -82,7 +92,7 @@ python main.py /path/to/usb --exclude-archives .apk,.jar --output report.html
 |--------|-------------|---------|
 | `path` | Path to scan (folder or file) | Required |
 | `--output`, `-o` | Output file path | `report.html` |
-| `--format`, `-f` | Output format (`html` or `csv`) | `html` |
+| `--format`, `-f` | Output format (`html`, `csv`, `ecs`, or `jsonl`) | `html` |
 | `--log` | Log file path (enables detailed logging) | None |
 | `-v`, `--verbose` | Verbose mode - show detailed logging of file analysis | False |
 | `--defender` | Scan files with Windows Defender for malware detection | False |
@@ -155,3 +165,51 @@ Each report is self-contained with:
 - Browser becomes slow/unresponsive with large reports
 - Files exceed 500k+ (recommended: `--split-report 100000`)
 - Need to share portions of a large scan
+
+### ECS Integration (SIEM / Elasticsearch)
+
+ArtifactSleuth supports **Elastic Common Schema (ECS)** output for seamless integration with Elasticsearch, Logstash, Kibana, and other SIEM platforms.
+
+**Generate ECS JSON report:**
+```bash
+python main.py /path/to/usb --format ecs --output report.json
+```
+
+**Generate ECS JSON Lines for bulk ingestion:**
+```bash
+python main.py /path/to/usb --format jsonl --output report.jsonl
+```
+
+**Features:**
+- **Standards-compliant**: Conforms to ECS 8.x specification
+- **SIEM-ready**: Direct ingestion into Elasticsearch without transformation
+- **Rich context**: File metadata, hashes, IOCs, threat intelligence all in ECS format
+- **Custom namespace**: ArtifactSleuth-specific fields in `artifactsleuth.*` namespace
+
+**Use cases:**
+- Centralized forensic analysis across multiple scans
+- Long-term storage and correlation with security events
+- Building detection rules and dashboards in Kibana
+- Integration with SOAR platforms
+
+**Ingesting to Elasticsearch:**
+```bash
+# Using curl to bulk ingest JSONL
+curl -X POST "localhost:9200/_bulk" -H 'Content-Type: application/x-ndjson' --data-binary @report.jsonl
+
+# Using Logstash
+input {
+  file {
+    path => "/path/to/report.jsonl"
+    codec => "json_lines"
+  }
+}
+output {
+  elasticsearch {
+    hosts => ["localhost:9200"]
+    index => "artifactsleuth-%{+YYYY.MM.dd}"
+  }
+}
+```
+
+See `docs/ECS_NORMALIZATION_PLAN.md` for detailed field mappings and examples.

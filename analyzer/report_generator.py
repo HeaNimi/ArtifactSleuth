@@ -58,6 +58,104 @@ def generate_csv_report(
             writer.writerow(row)
 
 
+def generate_ecs_report(
+    files: List[FileInfo],
+    summary: Dict[str, Any],
+    output_path: str
+) -> None:
+    """
+    Generate an ECS (Elastic Common Schema) JSON report from scan results.
+    
+    Args:
+        files: List of FileInfo objects
+        summary: Scan summary dictionary
+        output_path: Path to save the JSON file
+    """
+    # Convert all files to ECS format
+    ecs_events = [file_info.to_ecs() for file_info in files]
+    
+    # Create report metadata
+    report_metadata = {
+        "@timestamp": datetime.utcnow().isoformat() + "Z",
+        "event": {
+            "kind": "event",
+            "category": ["file"],
+            "type": ["info"],
+            "dataset": "artifactsleuth.summary",
+            "created": datetime.utcnow().isoformat() + "Z"
+        },
+        "artifactsleuth": {
+            "scan": {
+                "total_files": summary.get('total_files', 0),
+                "total_size": summary.get('total_size', 0),
+                "scan_path": summary.get('scan_path', ''),
+                "scan_duration": summary.get('scan_duration', 0),
+                "high_risk_files": summary.get('high_risk_files', 0),
+                "medium_risk_files": summary.get('medium_risk_files', 0),
+                "archives_processed": summary.get('archives_processed', 0),
+                "password_protected_archives": summary.get('password_protected_archives', 0)
+            }
+        }
+    }
+    
+    # Combine metadata and events
+    ecs_report = {
+        "metadata": report_metadata,
+        "events": ecs_events
+    }
+    
+    # Write to JSON file
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(ecs_report, f, indent=2, ensure_ascii=False)
+
+
+def generate_ecs_jsonl_report(
+    files: List[FileInfo],
+    summary: Dict[str, Any],
+    output_path: str
+) -> None:
+    """
+    Generate an ECS JSON Lines (JSONL) report for bulk ingestion.
+    Each line is a separate JSON document, ideal for Elasticsearch bulk API.
+    
+    Args:
+        files: List of FileInfo objects
+        summary: Scan summary dictionary
+        output_path: Path to save the JSONL file
+    """
+    with open(output_path, 'w', encoding='utf-8') as f:
+        # Write summary event first
+        summary_event = {
+            "@timestamp": datetime.utcnow().isoformat() + "Z",
+            "event": {
+                "kind": "event",
+                "category": ["file"],
+                "type": ["info"],
+                "dataset": "artifactsleuth.summary",
+                "created": datetime.utcnow().isoformat() + "Z"
+            },
+            "artifactsleuth": {
+                "scan": {
+                    "total_files": summary.get('total_files', 0),
+                    "total_size": summary.get('total_size', 0),
+                    "scan_path": summary.get('scan_path', ''),
+                    "scan_duration": summary.get('scan_duration', 0),
+                    "high_risk_files": summary.get('high_risk_files', 0),
+                    "medium_risk_files": summary.get('medium_risk_files', 0),
+                    "archives_processed": summary.get('archives_processed', 0),
+                    "password_protected_archives": summary.get('password_protected_archives', 0)
+                }
+            }
+        }
+        f.write(json.dumps(summary_event, ensure_ascii=False) + '\n')
+        
+        # Write each file as a separate line
+        for file_info in files:
+            ecs_event = file_info.to_ecs()
+            f.write(json.dumps(ecs_event, ensure_ascii=False) + '\n')
+
+
+
 # HTML Template with dark/light mode toggle and SHA256 copy button
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
@@ -115,20 +213,20 @@ HTML_TEMPLATE = '''
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 2rem;
-            padding-bottom: 1rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.75rem;
             border-bottom: 1px solid var(--border);
         }
         
         h1 {
-            font-size: 1.875rem;
+            font-size: 1.25rem;
             font-weight: 700;
             color: var(--text-primary);
         }
         
         .header-meta {
             color: var(--text-secondary);
-            font-size: 0.875rem;
+            font-size: 0.75rem;
         }
         
         .theme-toggle, .copy-btn, .view-btn {
@@ -160,28 +258,28 @@ HTML_TEMPLATE = '''
         
         .summary-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-            margin-bottom: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 0.5rem;
+            margin-bottom: 1rem;
         }
         
         .summary-card {
             background: var(--bg-card);
             border: 1px solid var(--border);
-            border-radius: 0.75rem;
-            padding: 1.25rem;
+            border-radius: 0.5rem;
+            padding: 0.6rem 0.8rem;
         }
         
         .summary-card h3 {
-            font-size: 0.75rem;
+            font-size: 0.65rem;
             text-transform: uppercase;
             letter-spacing: 0.05em;
             color: var(--text-secondary);
-            margin-bottom: 0.5rem;
+            margin-bottom: 0.25rem;
         }
         
         .summary-card .value {
-            font-size: 1.5rem;
+            font-size: 1.1rem;
             font-weight: 700;
         }
         
@@ -350,7 +448,7 @@ HTML_TEMPLATE = '''
             bottom: 100%;
             left: 50%;
             transform: translateX(-50%);
-            background: var(--bg);
+            background: var(--bg-card);
             border: 1px solid var(--border);
             border-radius: 6px;
             padding: 0.75rem;
@@ -361,7 +459,7 @@ HTML_TEMPLATE = '''
             font-size: 0.85rem;
             line-height: 1.4;
             text-align: left;
-            color: var(--text);
+            color: var(--text-primary);
             font-weight: normal;
         }
         .tooltip-content::after {
@@ -612,9 +710,12 @@ HTML_TEMPLATE = '''
                     Generated: {{ generated_time }} | Scanned: {{ scan_path }}
                 </div>
             </div>
-            <button class="theme-toggle" onclick="toggleTheme()">
-                🌓 Toggle Theme
-            </button>
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <div style="background: var(--danger); color: white; padding: 0.4rem 0.8rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">🔒 Classified - For Internal Use</div>
+                <button class="theme-toggle" onclick="toggleTheme()">
+                    🌓 Toggle Theme
+                </button>
+            </div>
         </header>
         
         <!-- Summary Cards -->
@@ -671,12 +772,6 @@ HTML_TEMPLATE = '''
                         <option value="medium">Medium Risk (25-49)</option>
                         <option value="low">Low Risk (1-24)</option>
                         <option value="none">No Risk (0)</option>
-                    </select>
-                    <select id="pageSize">
-                        <option value="100">100 / page</option>
-                        <option value="250" selected>250 / page</option>
-                        <option value="500">500 / page</option>
-                        <option value="1000">1000 / page</option>
                     </select>
                     <span id="resultStats" style="color: var(--text-secondary); font-size: 0.875rem;">Loading...</span>
                 </div>
@@ -902,8 +997,6 @@ HTML_TEMPLATE = '''
         updateLoading('Parsing file data...', 10, '');
         let filesData = [];
         let filtered = [];
-        let page = 1;
-        let pageSize = 250;
         let debounceTimer = null;
         
         // Virtual scroll state
@@ -1515,9 +1608,9 @@ HTML_TEMPLATE = '''
             // Hashes Section
             html += '<h4 style="margin:1.5rem 0 1rem 0;color:var(--text-muted);border-bottom:1px solid var(--border);padding-bottom:0.5rem;">🔐 File Hashes</h4>';
             html += '<div class="details-grid">';
-            html += '<div class="detail-item"><div class="detail-label">MD5</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.md5||'-') + (f.md5 ? ' <button class="copy-btn" onclick="copyHash(\x27'+f.md5+'\x27,this)">📋</button>' : '') + '</div></div>';
-            html += '<div class="detail-item"><div class="detail-label">SHA1</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.sha1||'-') + (f.sha1 ? ' <button class="copy-btn" onclick="copyHash(\x27'+f.sha1+'\x27,this)">📋</button>' : '') + '</div></div>';
-            html += '<div class="detail-item"><div class="detail-label">SHA256</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;word-break:break-all;">' + (f.sha256||'-') + (f.sha256 ? ' <button class="copy-btn" onclick="copyHash(\x27'+f.sha256+'\x27,this)">📋</button>' : '') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">MD5</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.md5||'-') + (f.md5 ? ' <button class="copy-btn" onclick="copyHash(\\x27'+f.md5+'\\x27,this)">📋</button>' : '') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">SHA1</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;">' + (f.sha1||'-') + (f.sha1 ? ' <button class="copy-btn" onclick="copyHash(\\x27'+f.sha1+'\\x27,this)">📋</button>' : '') + '</div></div>';
+            html += '<div class="detail-item"><div class="detail-label">SHA256</div><div class="detail-value" style="font-family:monospace;font-size:0.85rem;word-break:break-all;">' + (f.sha256||'-') + (f.sha256 ? ' <button class="copy-btn" onclick="copyHash(\\x27'+f.sha256+'\\x27,this)">📋</button>' : '') + '</div></div>';
             html += '</div>';
             
             // VirusTotal Section (if available)
@@ -1645,22 +1738,26 @@ HTML_TEMPLATE = '''
         // ==========================================
         // IOC Table with Pagination
         // ==========================================
-        const iocData = [];
-        // Build IOC data from files
-        filesData.forEach(function(f) {
-            if (f.exe_domains && f.exe_domains.length) {
-                f.exe_domains.forEach(function(d) {
-                    iocData.push({type: 'domain', value: d, source: f.relative_path || f.name});
-                });
-            }
-            if (f.exe_ips && f.exe_ips.length) {
-                f.exe_ips.forEach(function(ip) {
-                    iocData.push({type: 'ip', value: ip, source: f.relative_path || f.name});
-                });
-            }
-        });
+        let iocData = [];
+        let iocFiltered = [];
         
-        let iocFiltered = iocData.slice();
+        // Build IOC data from files (called after filesData is loaded)
+        function buildIOCData() {
+            iocData = [];
+            filesData.forEach(function(f) {
+                if (f.exe_domains && f.exe_domains.length) {
+                    f.exe_domains.forEach(function(d) {
+                        iocData.push({type: 'domain', value: d, source: f.relative_path || f.name});
+                    });
+                }
+                if (f.exe_ips && f.exe_ips.length) {
+                    f.exe_ips.forEach(function(ip) {
+                        iocData.push({type: 'ip', value: ip, source: f.relative_path || f.name});
+                    });
+                }
+            });
+            iocFiltered = iocData.slice();
+        }
         let iocPage = 1;
         const iocPageSize = 50;
         
@@ -1744,6 +1841,8 @@ HTML_TEMPLATE = '''
                             
                             setTimeout(() => {
                                 updateVirtualScroll();
+                                buildIOCData();
+                                renderIOCs();
                                 updateLoading('Complete!', 100, total.toLocaleString() + ' files loaded');
                                 
                                 setTimeout(hideLoading, 300);
@@ -1908,16 +2007,24 @@ def generate_report(
         summary: Scan summary dictionary
         output_path: Path to save the report
         scan_path: Original path that was scanned
-        format: 'html' or 'csv'
+        format: 'html', 'csv', 'ecs', or 'jsonl'
         split_threshold: If > 0, split HTML reports into parts with this many files each
     
     Returns:
         List of generated report paths
     """
-    if format.lower() == 'csv':
+    format_lower = format.lower()
+    
+    if format_lower == 'csv':
         generate_csv_report(files, summary, output_path)
         return [output_path]
-    else:
+    elif format_lower == 'ecs':
+        generate_ecs_report(files, summary, output_path)
+        return [output_path]
+    elif format_lower == 'jsonl':
+        generate_ecs_jsonl_report(files, summary, output_path)
+        return [output_path]
+    else:  # html
         if split_threshold > 0:
             return generate_split_html_reports(files, summary, output_path, scan_path, split_threshold)
         else:
