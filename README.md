@@ -213,10 +213,3 @@ output {
 ```
 
 See `docs/ECS_NORMALIZATION_PLAN.md` for detailed field mappings and examples.
-- Full search/filter functionality within that part
-- Independent pagination
-
-**When to use:**
-- Browser becomes slow/unresponsive with large reports
-- Files exceed 500k+ (recommended: `--split-report 100000`)
-- Need to share portions of a large scan
