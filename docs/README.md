@@ -34,6 +34,16 @@ CSV output:
 python main.py /path/to/usb --format csv --output report.csv
 ```
 
+ECS (Elastic Common Schema) JSON output:
+```bash
+python main.py /path/to/usb --format ecs --output report.json
+```
+
+ECS JSON Lines for Elasticsearch bulk ingestion:
+```bash
+python main.py /path/to/usb --format jsonl --output report.jsonl
+```
+
 Enable logging:
 ```bash
 python main.py /path/to/usb --log scan_errors.log --output report.html
@@ -60,7 +70,7 @@ python main.py /path/to/usb --no-vt --output report.html
 |--------|-------------|---------|
 | `path` | Path to scan (folder or file) | Required |
 | `--output`, `-o` | Output file path | `report.html` |
-| `--format`, `-f` | Output format (`html` or `csv`) | `html` |
+| `--format`, `-f` | Output format (`html`, `csv`, `ecs`, or `jsonl`) | `html` |
 | `--log` | Log file path (enables detailed logging) | None |
 | `--vt-key` | VirusTotal API key | None |
 | `--vt-rate` | VirusTotal rate limit (lookups/min) | 4 |
@@ -70,5 +80,7 @@ python main.py /path/to/usb --no-vt --output report.html
 
 - **HTML report**: Interactive view with filters, risk badges, and expandable file details.
 - **CSV report**: Flat export for SIEM, spreadsheets, or custom analysis.
+- **ECS JSON report**: Elastic Common Schema format for Elasticsearch/Kibana integration.
+- **ECS JSON Lines report**: Bulk ingestion format for Elasticsearch (one JSON document per line).
 - **Risk scoring**: Heuristics based on file type, indicators, and extracted signals.
 

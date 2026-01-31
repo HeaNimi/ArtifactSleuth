@@ -246,6 +246,17 @@ class FileInfo:
                 return f"{size:.1f} {unit}"
             size /= 1024.0
         return f"{size:.1f} PB"
+    
+    def to_ecs(self) -> Dict[str, Any]:
+        """
+        Convert to Elastic Common Schema (ECS) format.
+        Returns a dictionary conforming to ECS 8.x specification.
+        
+        This is a convenience wrapper around the ecs_converter module.
+        See analyzer/ecs_converter.py for the implementation details.
+        """
+        from .ecs_converter import convert_to_ecs
+        return convert_to_ecs(self)
 
 
 # Cache for file owner lookups to avoid repeated slow calls

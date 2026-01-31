@@ -58,6 +58,104 @@ def generate_csv_report(
             writer.writerow(row)
 
 
+def generate_ecs_report(
+    files: List[FileInfo],
+    summary: Dict[str, Any],
+    output_path: str
+) -> None:
+    """
+    Generate an ECS (Elastic Common Schema) JSON report from scan results.
+    
+    Args:
+        files: List of FileInfo objects
+        summary: Scan summary dictionary
+        output_path: Path to save the JSON file
+    """
+    # Convert all files to ECS format
+    ecs_events = [file_info.to_ecs() for file_info in files]
+    
+    # Create report metadata
+    report_metadata = {
+        "@timestamp": datetime.utcnow().isoformat() + "Z",
+        "event": {
+            "kind": "event",
+            "category": ["file"],
+            "type": ["info"],
+            "dataset": "artifactsleuth.summary",
+            "created": datetime.utcnow().isoformat() + "Z"
+        },
+        "artifactsleuth": {
+            "scan": {
+                "total_files": summary.get('total_files', 0),
+                "total_size": summary.get('total_size', 0),
+                "scan_path": summary.get('scan_path', ''),
+                "scan_duration": summary.get('scan_duration', 0),
+                "high_risk_files": summary.get('high_risk_files', 0),
+                "medium_risk_files": summary.get('medium_risk_files', 0),
+                "archives_processed": summary.get('archives_processed', 0),
+                "password_protected_archives": summary.get('password_protected_archives', 0)
+            }
+        }
+    }
+    
+    # Combine metadata and events
+    ecs_report = {
+        "metadata": report_metadata,
+        "events": ecs_events
+    }
+    
+    # Write to JSON file
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(ecs_report, f, indent=2, ensure_ascii=False)
+
+
+def generate_ecs_jsonl_report(
+    files: List[FileInfo],
+    summary: Dict[str, Any],
+    output_path: str
+) -> None:
+    """
+    Generate an ECS JSON Lines (JSONL) report for bulk ingestion.
+    Each line is a separate JSON document, ideal for Elasticsearch bulk API.
+    
+    Args:
+        files: List of FileInfo objects
+        summary: Scan summary dictionary
+        output_path: Path to save the JSONL file
+    """
+    with open(output_path, 'w', encoding='utf-8') as f:
+        # Write summary event first
+        summary_event = {
+            "@timestamp": datetime.utcnow().isoformat() + "Z",
+            "event": {
+                "kind": "event",
+                "category": ["file"],
+                "type": ["info"],
+                "dataset": "artifactsleuth.summary",
+                "created": datetime.utcnow().isoformat() + "Z"
+            },
+            "artifactsleuth": {
+                "scan": {
+                    "total_files": summary.get('total_files', 0),
+                    "total_size": summary.get('total_size', 0),
+                    "scan_path": summary.get('scan_path', ''),
+                    "scan_duration": summary.get('scan_duration', 0),
+                    "high_risk_files": summary.get('high_risk_files', 0),
+                    "medium_risk_files": summary.get('medium_risk_files', 0),
+                    "archives_processed": summary.get('archives_processed', 0),
+                    "password_protected_archives": summary.get('password_protected_archives', 0)
+                }
+            }
+        }
+        f.write(json.dumps(summary_event, ensure_ascii=False) + '\n')
+        
+        # Write each file as a separate line
+        for file_info in files:
+            ecs_event = file_info.to_ecs()
+            f.write(json.dumps(ecs_event, ensure_ascii=False) + '\n')
+
+
+
 # HTML Template with dark/light mode toggle and SHA256 copy button
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
@@ -1909,16 +2007,24 @@ def generate_report(
         summary: Scan summary dictionary
         output_path: Path to save the report
         scan_path: Original path that was scanned
-        format: 'html' or 'csv'
+        format: 'html', 'csv', 'ecs', or 'jsonl'
         split_threshold: If > 0, split HTML reports into parts with this many files each
     
     Returns:
         List of generated report paths
     """
-    if format.lower() == 'csv':
+    format_lower = format.lower()
+    
+    if format_lower == 'csv':
         generate_csv_report(files, summary, output_path)
         return [output_path]
-    else:
+    elif format_lower == 'ecs':
+        generate_ecs_report(files, summary, output_path)
+        return [output_path]
+    elif format_lower == 'jsonl':
+        generate_ecs_jsonl_report(files, summary, output_path)
+        return [output_path]
+    else:  # html
         if split_threshold > 0:
             return generate_split_html_reports(files, summary, output_path, scan_path, split_threshold)
         else:
